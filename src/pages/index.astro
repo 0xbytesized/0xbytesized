@@ -35,7 +35,7 @@ const posts = (await getCollection('blog')).sort(
         <li class="post-item">
           <span class="post-date">{formattedDate}</span>
           <div class="post-content">
-            <h3><a href={`/blog/${post.id}`}>{post.data.title}</a></h3>
+            <h3><a href={`/${post.id}`}>{post.data.title}</a></h3>
             <p class="post-excerpt">{post.data.excerpt}</p>
             <div class="post-tags">
               {post.data.tags.map(tag => <span class="tag">{tag}</span>)}

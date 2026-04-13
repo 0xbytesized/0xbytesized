@@ -15,7 +15,7 @@ export async function GET(context: { site: URL }) {
       title: post.data.title,
       pubDate: new Date(post.data.date),
       description: post.data.excerpt,
-      link: `/blog/${post.id}/`,
+      link: `/${post.id}/`,
       categories: post.data.tags,
     })),
     customData: `<lastBuildDate>${new Date().toUTCString()}</lastBuildDate>`,
