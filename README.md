@@ -29,17 +29,17 @@ interesante— escribo sobre ello. Este repo es donde vive todo eso.
 |---|----------|------|
 | 01 | [Tailwind CSS 4: cuando Rust se come a JavaScript](src/content/blog/tailwind-css-4-oxide.mdx) | `css` `rust` `tailwind` |
 | 02 | [Astro 5: Server Islands y la isla definitiva](src/content/blog/astro-5-server-islands.mdx) | `astro` `ssr` `islands` |
-| 03 | [Bun 1.2: el todoterreno del runtime JS](src/content/blog/bun-1-2-todo-lo-que-necesitas.mdx) | `bun` `runtime` `node` |
-| 04 | [Svelte 5: Las Runas cambian todo](src/content/blog/svelte-5-runas.mdx) | `svelte` `reactivity` `runes` |
+| 03 | [Bun 1.2: el todoterreno del runtime JS](src/content/blog/bun-1-2-all-you-need.mdx) | `bun` `runtime` `node` |
+| 04 | [Svelte 5: Las Runas cambian todo](src/content/blog/svelte-5-runes.mdx) | `svelte` `reactivity` `runes` |
 | 05 | [React 19: Server Components ya son reales](src/content/blog/react-19-server-components.mdx) | `react` `rsc` `server` |
-| 06 | [Effect TS: tipos que cuidan de ti](src/content/blog/effect-ts-tipos-que-cuidan.mdx) | `typescript` `effect` `fp` |
-| 07 | [Biome 2: linting rápido con tipos](src/content/blog/biome-2-linting-rapido-con-tipos.mdx) | `biome` `linting` `rust` |
+| 06 | [Effect TS: tipos que cuidan de ti](src/content/blog/effect-ts-types-that-care.mdx) | `typescript` `effect` `fp` |
+| 07 | [Biome 2: linting rápido con tipos](src/content/blog/biome-2-fast-linting-with-types.mdx) | `biome` `linting` `rust` |
 | 08 | [Elysia: el framework de Bun con compilador JIT](src/content/blog/elysia-bun-framework-jit.mdx) | `elysia` `bun` `jit` |
-| 09 | [Vite 6: el nuevo ecosistema](src/content/blog/vite-6-ecosistema-moderno.mdx) | `vite` `bundling` `devtools` |
-| 10 | [Deno 2: compatibilidad total con Node](src/content/blog/deno-2-compatibilidad-node.mdx) | `deno` `node` `interop` |
-| 11 | [El final de Eleventy y la monetización de SSGs](src/content/blog/final-eleventy-monetizacion-ssg.mdx) | `eleventy` `ssg` `opensource` |
-| 12 | [Rust 2024 Edition: nuevas reglas](src/content/blog/rust-2024-edicion-nuevas-reglas.mdx) | `rust` `edition` `lifetimes` |
-| 13 | [Por qué la IA falla en frontend](src/content/blog/por-que-ai-falla-frontend.mdx) | `ai` `frontend` `css` |
+| 09 | [Vite 6: el nuevo ecosistema](src/content/blog/vite-6-modern-ecosystem.mdx) | `vite` `bundling` `devtools` |
+| 10 | [Deno 2: compatibilidad total con Node](src/content/blog/deno-2-node-compatibility.mdx) | `deno` `node` `interop` |
+| 11 | [El final de Eleventy y la monetización de SSGs](src/content/blog/end-of-eleventy-ssg-monetization.mdx) | `eleventy` `ssg` `opensource` |
+| 12 | [Rust 2024 Edition: nuevas reglas](src/content/blog/rust-2024-edition-new-rules.mdx) | `rust` `edition` `lifetimes` |
+| 13 | [Por qué la IA falla en frontend](src/content/blog/why-ai-fails-at-frontend.mdx) | `ai` `frontend` `css` |
 
 ## Stack
 
