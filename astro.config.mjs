@@ -2,6 +2,7 @@
 import { defineConfig } from 'astro/config';
 import mdx from '@astrojs/mdx';
 import sitemap from '@astrojs/sitemap';
+import rehypeExternalLinks from 'rehype-external-links';
 
 const site = 'https://0xbytesized.github.io';
 
@@ -18,4 +19,9 @@ export default defineConfig({
       filter: (page) => !page.includes('/404'),
     }),
   ],
+  markdown: {
+    rehypePlugins: [
+      [rehypeExternalLinks, { target: '_blank', rel: ['noopener', 'noreferrer'] }],
+    ],
+  },
 });
