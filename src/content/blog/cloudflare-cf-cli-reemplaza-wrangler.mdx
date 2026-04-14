@@ -37,7 +37,7 @@ cf dns records create --zone midominio.com --type A --name api --content "1.2.3.
 
 # Zonas
 cf zones list
-cf zones create-zones-post --name nuevo-dominio.com --type full
+cf zones create --name nuevo-dominio.com --type full
 
 # Cuentas
 cf accounts list
@@ -60,6 +60,7 @@ Y con eso vienen reglas estrictas:
 - Siempre disponibles en todos los comandos
 
 ```typescript
+// Nota: este ejemplo es ilustrativo y no proviene del código fuente real de Cloudflare.
 // Ejemplo simplificado de cómo se define un comando en el schema
 export default {
   name: "dns.records.create",
@@ -104,13 +105,13 @@ curl -X DELETE "http://localhost:8787/cdn-cgi/explorer/api/d1/main-db/query" \
   -d '{"sql": "DELETE FROM sessions WHERE expires_at < datetime(\"now\")"}'
 ```
 
-La ventaja es que la API local **mira** la API remota. Lo que funciona en local funciona en producción, y viceversa. No hay sorpresas al hacer deploy.
+La ventaja es que la API local **refleja** la API remota. Lo que funciona en local funciona en producción, y viceversa. No hay sorpresas al hacer deploy.
 
 ## ¿Qué significa para Wrangler?
 
 Cloudflare es claro: `cf` es el futuro de Wrangler, pero Wrangler no va a desaparecer mañana. Primero van a juntar lo mejor de Wrangler actual con las nuevas capacidades de `cf`, y el resultado será el CLI final. Si tienes scripts que usan `wrangler deploy`, van a seguir funcionando durante bastante tiempo.
 
-Lo que sí va a cambiar es el modelo mental. En lugar de pensar en "Wrangler = Workers", piensa en "cf = toda la plataforma". Y eso tiene todo el sentido cuando tu stack vive en Cloudflare:Workers, D1, R2, KV, WAF, DNS, Pages... todo se gestiona desde el mismo lugar.
+Lo que sí va a cambiar es el modelo mental. En lugar de pensar en "Wrangler = Workers", piensa en "cf = toda la plataforma". Y eso tiene todo el sentido cuando tu stack vive en Cloudflare: Workers, D1, R2, KV, WAF, DNS, Pages... todo se gestiona desde el mismo lugar.
 
 ## Mi opinión
 

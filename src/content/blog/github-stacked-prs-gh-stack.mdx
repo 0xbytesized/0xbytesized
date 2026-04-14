@@ -6,7 +6,7 @@ excerpt: "GitHub lanza Stacked PRs en preview privada. Divide cambios grandes en
 ---
 
 Si alguna vez has abierto un pull request de 2.000 líneas y has visto cómo tus
-compañeros ponían la cara de "no hoy", sabes el problema: los PRs enormes son
+compañeros ponían la cara de "hoy no", sabes el problema: los PRs enormes son
 imposibles de revisar bien. Los reviewers pierden contexto, el feedback baja en
 calidad, y los conflictos se acumulan. GitHub acaba de anunciar **Stacked
 PRs**, una solución nativa para dividir cambios grandes en cadenas de PRs
@@ -15,7 +15,7 @@ pequeños y dependientes. Y lo mejor: viene con un CLI,
 
 ## Qué son las Stacked PRs
 
-Una *stack* es una cadena de pull requests donde cada PR targets la rama del PR
+Una *stack* es una cadena de pull requests donde cada PR apunta a la rama del PR
 anterior, no `main` directamente. El primero de la cadena va contra `main`, el
 segundo contra la rama del primero, el tercero contra la del segundo, y así
 sucesivamente:
@@ -55,7 +55,7 @@ La joya de la corona es la extensión de CLI `gh stack`. Se instala así:
 gh extension install github/gh-stack
 ```
 
-Requiere GitHub CLI (`gh`) v2.0+ y Git 2.20+. El flujo de trabajo básico es
+Requiere GitHub CLI (`gh`) v2.0+. El flujo de trabajo básico es
 sencillísimo:
 
 ```bash
@@ -137,7 +137,7 @@ restaura todas las ramas a su estado previo.
 
 ## Sync: el comando que lo hace todo
 
-Para el día a día, `gh stack sync` es el navaja suiza: hace fetch, fast-forward
+Para el día a día, `gh stack sync` es la navaja suiza: hace fetch, fast-forward
 del trunk, rebase en cascada si main se movió, push con `--force-with-lease`,
 y sincroniza el estado de los PRs con GitHub. Todo en un solo comando:
 
@@ -172,9 +172,16 @@ Las stacks soportan los tres métodos de merge de GitHub:
 - **Squash merge**: un commit limpio por PR. Probablemente el más usado.
 - **Rebase merge**: replay lineal de commits, sin merge commits.
 
-La constraint clave: se mergea de abajo hacia arriba. No puedes mergear el PR
+La restricción clave: se mergea de abajo hacia arriba. No puedes mergear el PR
 del medio si el de abajo no está merged. Tiene todo el sentido del mundo — cada
 capa depende de la anterior.
+
+> **Nota:** En el momento de escribir esto, `gh stack merge` aún no está
+> implementado; el merge se realiza manualmente desde la UI de GitHub. Además, si
+> usas squash merge, ten en cuenta que los commits squash de las capas inferiores
+> cambian el historial de las ramas superiores, por lo que necesitas hacer rebase
+> con el modo `--onto` para rebasear cada capa sobre el nuevo estado de `main`
+> tras cada merge.
 
 ## Mi veredicto
 

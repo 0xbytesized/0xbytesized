@@ -14,13 +14,14 @@ hacer `cargo add servo` y embeber un motor web completo en tu aplicación Rust.
 ## Qué es Servo y por qué importa
 
 Servo es un motor de renderizado web escrito en Rust. Al igual que WebKit o
-Blink, parsea HTML, ejecuta JavaScript, aplica CSS, y pinta píxeles en pantalla.
+Blink, parsea HTML, ejecuta JavaScript, aplica CSS y pinta píxeles en pantalla.
 Pero a diferencia de esos motores — que son gigantes monolitos en C++ con
 décadas de deuda técnica — Servo se diseñó desde cero aprovechando el modelo
 de ownership y concurrencia segura de Rust.
 
-El proyecto arrancó en 2012 dentro de Mozilla Research. Cuando Mozilla
-reestructuró en 2020, Servo encontró cobijo bajo la **Linux Foundation Europe**.
+El proyecto arrancó en 2012 dentro de Mozilla Research. Tras los recortes de
+Mozilla en 2020, el desarrollo se ralentizó, pero en 2023 Servo encontró cobijo
+bajo la **Linux Foundation Europe**.
 Desde entonces ha tenido un desarrollo constante con releases mensuales
 (empezando en octubre de 2025 con v0.0.1), y hoy llega a su primer hito
 significativo publicando crates.
@@ -29,7 +30,7 @@ Y hay un detalle que me encanta: **también publicaron Stylo y WebRender como
 crates independientes**. Stylo es el motor de CSS de Firefox (sí, Firefox usa
 el CSS engine de Servo desde hace años), y WebRender es el compositor GPU que
 también alimenta Firefox. Si solo necesitas diseño CSS o renderizado
-GPU-acelerado, puedes usar essas crates sin cargar todo el navegador.
+GPU-acelerado, puedes usar esas crates sin cargar todo el navegador.
 
 ## Cómo se usa
 
@@ -166,14 +167,14 @@ y actualizarte cada medio año en lugar de cada mes.
 
 ## Qué falta
 
-No me voy aponer nostálgico. Servo 0.1 no es Chrome. Los web platform tests
+No me voy a poner nostálgico. Servo 0.1 no es Chrome. Los web platform tests
 pass rates siguen siendo parciales (el propio proyecto reconoce que les falta
 mucho camino por recorrer en compatibilidad web). No hay una tabla tipo
 caniuse.com para ver qué features CSS/JS están implementadas, aunque tienen
 [wpt results](https://servo.org/wpt/) y un listado de APIs auto-generado.
 
 Pero — y esto es lo importante — el hito de hoy no es "Servo reemplaza a
-Chrome". Es "Servo ya es una dependencia que puedes add a tu proyecto". Y eso
+Chrome". Es "Servo ya es una dependencia que puedes añadir a tu proyecto". Y eso
 cambia las reglas del juego para el ecosistema Rust.
 
 ## Mi opinión
