@@ -25,7 +25,7 @@ en producción.
 
 ### 1. Working copy como commit
 
-En Git, modificas archivos, haces `git add` para stagear, y luego `git commit`.
+En Git, modificas archivos, haces `git add` para stagear y luego `git commit`.
 El staging area es una capa extra que complica el modelo mental y genera
 fricción constante.
 
@@ -87,7 +87,7 @@ Cuando modificas un commit en Git — por ejemplo, haces un `commit --amend` —
 los commits hijos no se actualizan automáticamente. Tienes que acordarte de
 hacer `rebase --update-refs` o gestionar las ramas a mano.
 
-En `jj`, cuando modificas un commit, **todos sus descendientes se rebas
+En `jj`, cuando modificas un commit, **todos sus descendientes se rebasan
 automáticamente**. No hay que hacer nada. Es transparente:
 
 ```bash
@@ -156,7 +156,7 @@ reflog como mecanismo de recuperación es una chapuza que el operation log
 resuelve de raíz.
 
 Dicho esto, `jj` sigue siendo versión 0.x. La API de comandos puede cambiar
-entre releases. No hay soporte nativo para submodules todavıa (está en progreso).
+entre releases. No hay soporte nativo para submodules todavía (está en progreso).
 Y la curva de aprendizaje existe — no porque `jj` sea complicado, sino porque
 tienes que desaprender costumbres de Git.
 

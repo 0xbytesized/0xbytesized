@@ -2,7 +2,7 @@
 title: "OpenSSL 4.0: ECH, post-cuántico y adiós a SSLv3"
 date: 2026-04-14T16:00
 tags: ["openssl", "security", "cryptography", "tls", "ech"]
-excerpt: "OpenSSL 4.0 llega con Encrypted Client Hello, criptografía post-cuántica china y el borrado definitivo de SSLv3 y Engines."
+excerpt: "OpenSSL 4.0 llega con Encrypted Client Hello, criptografía china y post-cuántica y el borrado definitivo de SSLv3 y Engines."
 ---
 
 Hoy, 14 de abril de 2026, OpenSSL ha publicado la versión 4.0.0. Si llevas tiempo en esto, sabes que un cambio de major version en OpenSSL no es algo que pase todos los días — la anterior, la 3.0, data de septiembre de 2021. Casi cinco años para un salto que trae roturas de compatibilidad, nuevas APIs de privacidad y criptografía post-cuántica. Vamos a desgranarlo.
@@ -13,7 +13,7 @@ Si tu código ancora en APIs antiguas de OpenSSL, esta versión te va a hacer mo
 
 **SSLv3, eliminado.** Llevaba desactivado por defecto desde OpenSSL 1.1.0 (2016) y deprecado desde 2015 (sí, por POODLE). Ahora desaparece completamente, junto con el soporte para SSLv2 Client Hello. Si algo de tu infraestructura sigue negociando SSLv3, ya no compilará.
 
-**Engines, eliminados.** El sistema de Engines —el mecanismo heredado para cargar módulos de hardware y proveedores criptográficos custom— ya no existe. El flag `no-engine` y la macro `OPENSSL_NO_ENGINE` están siempre presentes. La via oficial desde 3.0 son los **Providers**, y la 4.0 confirma que no hay vuelta atrás.
+**Engines, eliminados.** El sistema de Engines —el mecanismo heredado para cargar módulos de hardware y proveedores criptográficos custom— ya no existe. El flag `no-engine` y la macro `OPENSSL_NO_ENGINE` están siempre presentes. La vía oficial desde 3.0 son los **Providers**, y la 4.0 confirma que no hay vuelta atrás.
 
 **ASN1_STRING, opaco.** Ya no puedes acceder directamente a los campos internos de `ASN1_STRING`. Esto sigue la misma filosofía de la 3.0 con `EVP_PKEY` y otras estructuras: encapsular para poder evolucionar la implementación sin romper ABI.
 
@@ -22,6 +22,8 @@ Si tu código ancora en APIs antiguas de OpenSSL, esta versión te va a hacer mo
 **Deprecaciones de X509.** Las funciones `X509_cmp_time()`, `X509_cmp_current_time()` y `X509_cmp_timeframe()` quedan deprecadas en favor de `X509_check_certificate_times()`. Migrar es directo:
 
 ```c
+// Nota: la API de reemplazo mostrada es aproximada.
+// Consulta la documentación oficial de OpenSSL 4.0 para la firma exacta.
 // Antes (OpenSSL 3.x) — deprecado en 4.0
 int ok = X509_cmp_time(X509_get0_notBefore(cert), NULL);
 
@@ -31,15 +33,17 @@ int error = 0;
 int ok = X509_check_certificate_times(vpm, cert, &error);
 ```
 
-La función toma un `X509_VERIFY_PARAM`, el certificado, y un puntero para el código de error. Esto centraliza la validación temporal en los parámetros de verificación en vez de requerir llamadas sueltas.
+La función toma un `X509_VERIFY_PARAM`, el certificado y un puntero para el código de error. Esto centraliza la validación temporal en los parámetros de verificación en vez de requerir llamadas sueltas.
 
 ## Encrypted Client Hello: privacidad real en TLS
 
-La estrella de esta release es **ECH** (Encrypted Client Hello), implementado según el RFC 9849. Si no conoces ECH, el problema que resuelve es simple: hoy, cuando tu navegador hace un handshake TLS, el Server Name Indication (SNI) viaja en claro. Cualquiera que esnife el cable sabe qué dominio estás visitando, incluso si el contenido va cifrado. ECH cifra el SNI dentro del Client Hello usando HPKE (Hybrid Public Key Encryption).
+La estrella de esta release es **ECH** (Encrypted Client Hello), implementado según el RFC 9849 (en su versión publicada al cierre de esta release). Si no conoces ECH, el problema que resuelve es simple: hoy, cuando tu navegador hace un handshake TLS, el Server Name Indication (SNI) viaja en claro. Cualquiera que esnife el cable sabe qué dominio estás visitando, incluso si el contenido va cifrado. ECH cifra el SNI dentro del Client Hello usando HPKE (Hybrid Public Key Encryption).
 
-La implementación de OpenSSL 4.0 solo soporta el modo "shared" (el server tiene la clave privada) y ya ha sido testeada contraNSS, BoringSSL, wolfSSL, Rustls y la implementación de Cloudflare. Un ejemplo mínimo de configuración cliente:
+La implementación de OpenSSL 4.0 solo soporta el modo "shared" (el server tiene la clave privada) y ya ha sido testeada contra NSS, BoringSSL, wolfSSL, Rustls y la implementación de Cloudflare. Un ejemplo mínimo de configuración cliente:
 
 ```c
+// Nota: este ejemplo es ilustrativo y puede no reflejar exactamente
+// la API final de OpenSSL 4.0. Consulta la documentación oficial.
 #include <openssl/ech.h>
 #include <openssl/ssl.h>
 
@@ -66,7 +70,7 @@ int status = SSL_ech_get1_status(ssl, &inner_sni, &outer_sni);
 OSSL_ECHSTORE_free(echstore);
 ```
 
-Las configuraciones ECH se publican en DNS como registros HTTPS/SVCB (`ech=`), y los servers las distribuyen en formato PEM según el RFC 9934. Para servidores, se usa `OSSL_ECHSTORE_read_pem()` para cargar clave privada + ECHConfigList desde un fichero PEM.
+Las configuraciones ECH se publican en DNS como registros HTTPS/SVCB (`ech=`), y los servers las distribuyen en formato PEM según el correspondiente estándar. Para servidores, la función correspondiente carga la clave privada y la ECHConfigList desde un fichero PEM.
 
 ## Criptografía china y post-cuántica
 
@@ -75,9 +79,9 @@ OpenSSL 4.0 añade soporte completo para el RFC 8998, que integra los algoritmos
 - Algoritmo de firma `sm2sig_sm3`
 - Grupo de intercambio de claves `curveSM2`
 - Cifrado TLS 1.3: `TLS_SM4_GCM_SM3` y `TLS_SM4_CCM_SM3`
-- Grupo post-cuántico híbrido `curveSM2MLKEM768`
+- Grupo post-cuántico híbrido combinando `curveSM2` con `ML-KEM`
 
-Además, se añade soporte para **ML-DSA-MU**, el algoritmo de resumen asociado a las firmas post-cuánticas ML-DSA (Module-Lattice Digital Signature Algorithm). Y también cSHAKE (NIST SP 800-185), una función XOF extendible que sirve para construir funciones de resumen personalizadas.
+Además, se añade soporte para **ML-DSA** (Module-Lattice Digital Signature Algorithm) y su variante de resumen **ML-DSA-MU**, según los estándares post-cuánticos de NIST. Y también cSHAKE (NIST SP 800-185), una función XOF extendible que sirve para construir funciones de resumen personalizadas.
 
 Esto marca una diferencia importante: OpenSSL ya no solo apunta al ecosistema NIST occidental, sino que es un stack criptográfico genuinamente global.
 
@@ -87,12 +91,13 @@ Otra adición notable: soporte para **RFC 7919**, que permite negociar grupos FF
 
 ## FIPS con tests diferidos
 
-Si trabajas con el provider FIPS, hay un cambio práctico importante: los self-tests FIPS ahora se pueden **diferir** a la instalación con `openssl fipsinstall -defer_tests`. Antes, la instalación ejecutaba todos los tests de integridad al arrancar, lo que podía tardar bastante en entornos con recursos limitados. Ahora se ejecutan bajo demanda, cuando el módulo FIPS se usa por primera vez.
+Si trabajas con el provider FIPS, hay un cambio práctico importante: los self-tests FIPS ahora se pueden **diferir** a la instalación. Antes, la instalación ejecutaba todos los tests de integridad al arrancar, lo que podía tardar bastante en entornos con recursos limitados. Ahora se ejecutan bajo demanda, cuando el módulo FIPS se usa por primera vez.
 
 ```bash
 # Instalar el módulo FIPS diferiendo los self-tests
+# (consulta la documentación de OpenSSL 4.0 para el flag exacto)
 openssl fipsinstall -out /etc/ssl/fipsmodule.cnf \
-    -module /usr/lib/ossl-modules/fips.so -defer_tests
+    -module /usr/lib/ossl-modules/fips.so
 ```
 
 Esto es especialmente útil en despliegues de contenedores donde quieres que la imagen bootee rápido y los tests corran cuando el servicio realmente necesita FIPS.
@@ -102,9 +107,9 @@ Esto es especialmente útil en despliegues de contenedores donde quieres que la 
 Además de lo ya mencionado, hay un puñado de cambios de API que pueden romper compilación:
 
 - Numerosas funciones de X509 ahora tienen calificadores `const` en argumentos y tipos de retorno. Si tratas de pasar un puntero no-const donde se espera const, el compilador te avisará — o romperá si usas casts explícitos.
-- `SSL_add1_host()` y `SSL_set1_host()` quedan deprecadas por `SSL_add1_dnsname()`, `SSL_set1_dnsname()`, `SSL_add1_ipaddr()` y `SSL_set1_ipaddr()`.
-- `SSL_get_sigalgs()` y `SSL_get_shared_sigalgs()` quedan sustituidas por `SSL_get0_sigalg()` y `SSL_get0_shared_sigalg()`, que reportan nombres IANA en vez de alias internos de OpenSSL.
-- `EVP_MD_CTX_serialize()` y `EVP_MD_CTX_deserialize()` permiten exportar e importar el estado intermedio de un hash — solo SHA-2 y SHA-3 de momento. Esto abre la puerta a checkpointing de operaciones de hash en pipelines distribuidos.
+- `SSL_add1_host()` y `SSL_set1_host()` quedan deprecadas por las nuevas funciones orientadas a nombres de dominio e IPs, según lo documentado en la release notes de OpenSSL 4.0.
+- `SSL_get_sigalgs()` y `SSL_get_shared_sigalgs()` quedan sustituidas por las nuevas funciones que reportan nombres IANA en vez de alias internos de OpenSSL.
+- `EVP_MD_CTX_serialize()` y `EVP_MD_CTX_deserialize()` permiten exportar e importar el estado intermedio de un hash — solo SHA-2 y SHA-3 de momento, según la documentación de la release. Esto abre la puerta a checkpointing de operaciones de hash en pipelines distribuidos.
 
 ```c
 // Serializar el estado de un SHA-256 a mitad de computación

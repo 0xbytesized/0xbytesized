@@ -5,7 +5,7 @@ tags: ["cloudflare", "cli", "devtools", "workers", "infraestructura"]
 excerpt: "Cloudflare presenta cf, un CLI unificado para toda su plataforma, y Local Explorer para inspeccionar recursos locales. El principio del fin para Wrangler."
 ---
 
-Si has trabajado con Cloudflare Workers, conoces Wrangler. Es el CLI que usas para `wrangler dev`, `wrangler deploy`, y poco más. El problema es que Cloudflare tiene más de 100 productos y casi 3.000 operaciones en su API HTTP, y Wrangler solo cubre una fracción. ¿Necesitas gestionar DNS desde la terminal? Vuelve al dashboard. ¿Configurar un WAF rule? Lo mismo. La solución hasta ahora era la API REST, Terraform o el SDK.
+Si has trabajado con Cloudflare Workers, conoces Wrangler. Es el CLI que usas para `wrangler dev`, `wrangler deploy` y poco más. El problema es que Cloudflare tiene más de 100 productos y casi 3.000 operaciones en su API HTTP, y Wrangler solo cubre una fracción. ¿Necesitas gestionar DNS desde la terminal? Vuelve al dashboard. ¿Configurar un WAF rule? Lo mismo. La solución hasta ahora era la API REST, Terraform o el SDK.
 
 Eso está cambiando. Cloudflare acaba de anunciar **`cf`**, un nuevo CLI diseñado para cubrir **toda** la plataforma, y **Local Explorer**, una herramienta para inspeccionar los recursos locales de tu Worker durante el desarrollo. Ambos forman parte de lo que Cloudflare llama "Agents Week", y son una señal clara de hacia dónde va la plataforma.
 
@@ -50,7 +50,7 @@ La idea es que **cada producto de Cloudflare** tenga sus comandos equivalentes. 
 
 Uno de los problemas de Wrangler es que los comandos crecieron de forma orgánica. Algunos usaban `info`, otros `get`, otros `list`. Las flags eran inconsistentes: `--format` en un sitio, `--json` en otro. Para un humano es molesto; para un agente de IA que genera comandos, es un desastre.
 
-Cloudflare ha creado un sistema de **schemas en TypeScript** que definen no solo la API REST, sino también los comandos CLI, los argumentos, la configuración en `wrangler.jsonc`, y los bindings de Workers. Todo se genera a partir del mismo schema.
+Cloudflare ha creado un sistema de **schemas en TypeScript** que definen no solo la API REST, sino también los comandos CLI, los argumentos, la configuración en `wrangler.jsonc` y los bindings de Workers. Todo se genera a partir del mismo schema.
 
 Y con eso vienen reglas estrictas:
 
@@ -94,7 +94,7 @@ wrangler dev
 # Pulsas 'e' y se abre http://localhost:XXXX en tu navegador
 ```
 
-Y lo más interesante para los agentes: la API local está disponible en `/cdn-cgi/explorer/api` con una especificación OpenAPI. Esto significa que un agente de IA puede apuntar a esa URL y entender qué recursos tiene disponibles, qué datos hay en cada uno, y modificarlos con las mismas llamadas API que usaría en producción.
+Y lo más interesante para los agentes: la API local está disponible en `/cdn-cgi/explorer/api` con una especificación OpenAPI. Esto significa que un agente de IA puede apuntar a esa URL y entender qué recursos tiene disponibles, qué datos hay en cada uno y modificarlos con las mismas llamadas API que usaría en producción.
 
 ```bash
 # Un agente puede descubrir los recursos locales vía OpenAPI
