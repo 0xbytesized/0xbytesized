@@ -2,9 +2,11 @@ import rss from '@astrojs/rss';
 import { getCollection } from 'astro:content';
 
 export async function GET(context: { site: URL }) {
-  const posts = (await getCollection('blog')).sort(
-    (a, b) => b.data.date.localeCompare(a.data.date)
-  );
+  const posts = (await getCollection('blog')).sort((a, b) => {
+    const aDate = typeof a.data.date === 'string' ? a.data.date : a.data.date.toISOString();
+    const bDate = typeof b.data.date === 'string' ? b.data.date : b.data.date.toISOString();
+    return bDate.localeCompare(aDate);
+  });
 
   return rss({
     title: '0xbytesized',
