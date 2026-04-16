@@ -1,0 +1,142 @@
+---
+title: "MacMind: un transformer en HyperCard sobre un Mac de 1989"
+date: 2026-04-16T16:50
+tags: ["machine-learning", "retrocomputing", "hypercard", "transformer", "open-source"]
+excerpt: "Un transformer de 1.216 parámetros implementado en HyperTalk que aprende la permutación bit-reversal del FFT. La misma matemática de GPT, a escala de 1987."
+---
+
+Si te dijeran que puedes entrenar un transformer neural desde cero en un ordenador de 1987, ¿lo creerías? [MacMind](https://github.com/SeanFDZ/macmind) demuestra que sí se puede. Es una red neuronal completa —embeddings, self-attention, backpropagation, descenso de gradiente— escrita íntegramente en HyperTalk, el lenguaje de scripting que Apple incluía con HyperCard. Y corre en un Macintosh SE/30 de 1989 con 4 MB de RAM.
+
+## Qué es MacMind y por qué importa
+
+MacMind es un transformer de 1.216 parámetros que aprende la **permutación bit-reversal**: el primer paso del Fast Fourier Transform (FFT). La tarea consiste en reordenar una secuencia de 8 dígitos invirtiendo la representación binaria de cada índice:
+
+```
+Posición:  0    1    2    3    4    5    6    7
+Binario:  000  001  010  011  100  101  110  111
+Reverso:  000  100  010  110  001  101  011  111
+Mapea a:   0    4    2    6    1    5    3    7
+```
+
+Si la entrada es `[3, 7, 1, 9, 5, 2, 8, 4]`, la salida correcta es `[3, 5, 1, 8, 7, 2, 9, 4]`. El modelo nunca recibe la regla — la descubre por sí solo a través de atención y descenso de gradiente, exactamente como los modelos grandes aprenden patrones en lenguaje.
+
+Lo fascinante: tras el entrenamiento, el **mapa de atención** muestra el patrón *butterfly* del FFT. Es la misma estructura que Cooley y Tukey publicaron en 1965. Un modelo de 1.216 parámetros, sin acceso a la fórmula, redescubre la misma matemática por pura iteración.
+
+## La arquitectura, al detalle
+
+MacMind implementa un transformer de una capa y una cabeza. La arquitectura es deliberadamente minimal:
+
+| Componente | Dimensiones | Parámetros |
+|---|---|---|
+| Token embeddings (W_embed) | 10 × 16 | 160 |
+| Position Embeddings (W_pos) | 8 × 16 | 128 |
+| Proyección Query (W_Q) | 16 × 16 | 256 |
+| Proyección Key (W_K) | 16 × 16 | 256 |
+| Proyección Value (W_V) | 16 × 16 | 256 |
+| Proyección Output (W_out) | 16 × 10 | 160 |
+| **Total** | | **1.216** |
+
+El flujo de datos es el mismo que cualquier transformer moderno:
+
+```python
+# Forward pass simplificado (del validador Python incluido)
+def forward(W, digits):
+    # 1. Embeddings: token + posición
+    embedded = W["W_embed"][digits] + W["W_pos"]  # [8 × 16]
+
+    # 2. Proyecciones Q, K, V
+    Q = embedded @ W["W_Q"]  # [8 × 16]
+    K = embedded @ W["W_K"]  # [8 × 16]
+    V = embedded @ W["W_V"]  # [8 × 16]
+
+    # 3. Atención escalada
+    scores = (Q @ K.T) * 0.25    # 1/sqrt(16)
+    attn = softmax(scores)         # [8 × 8]
+
+    # 4. Contexto + conexión residual
+    context = attn @ V
+    residual = context + embedded  # [8 × 16]
+
+    # 5. Logits de salida
+    logits = residual @ W["W_out"]  # [8 × 10]
+    return softmax(logits)           # probabilidades por posición
+```
+
+1.216 parámetros. GPT-4 tiene aproximadamente un billón. La matemática es idéntica. La diferencia es escala, no naturaleza.
+
+## HyperTalk como lenguaje de ML
+
+Aquí está lo verdaderamente salvaje del proyecto: HyperTalk no fue diseñado para nada remotamente matemático. Es un lenguaje de scripting para pilas de tarjetas interactivas — el precursor visual de lo que hoy llamaríamos una app sin código.
+
+El autor se encontró con un problema sutil pero crítico: **HyperCard 1.x evalúa la aritmética de izquierda a derecha sin precedencia estándar**. Es decir, `2 + 3 * 4` devuelve `20` en vez de `14`. Eso corrompería silenciosamente cada multiplicación de matrices y cada cálculo de gradientes. MacMind requiere HyperCard 2.0 o superior, que introdujo la precedencia matemática correcta.
+
+Los pesos se almacenan como listas de números separados por comas en campos ocultos de la pila de HyperCard. Una matriz de 16×16 son 256 valores en un solo campo. Guardas el archivo, cierras, reabres: el modelo entrenado sigue ahí.
+
+## Entrenamiento en hardware real
+
+Cada paso de entrenamiento en un Mac SE/30 toma varios segundos. Entrenar hasta convergencia (~1.000 pasos) requiere **horas**. El autor dejó el modelo entrenando toda la noche, iterando backpropagation una multiplicación-acumulación a 8 MHz por vez.
+
+Esto no es una demostración teórica que compila a C. Es HyperTalk interpretado, en tiempo real, en hardware de 1987. Cada acceso a variable, cada operación con coma flotante, cada campo de la pila, pasa por el intérprete.
+
+El proyecto incluye un validador Python/NumPy que replica exactamente la misma arquitectura y confirma que converge a 100% de precisión:
+
+```python
+# Del validador incluido en el repositorio
+W = init_model(rng)  # 1.216 parámetros, Xavier init
+
+for step in range(3000):
+    digits = rng.randint(0, 10, size=8)
+    targets = [PERM[i] for i in range(8)]  # [0,4,2,6,1,5,3,7]
+
+    act = forward(W, digits)
+    loss, acc = compute_loss(act, targets)
+    grads = backward(W, act, digits, targets)
+    W = update_weights(W, grads, lr=0.01)
+```
+
+## La permutación bit-reversal por dentro
+
+La permutación que aprende el modelo es el primer paso del FFT, uno de los algoritmos más importantes de la computación. Dada una secuencia de N elementos, reordena sus posiciones invirtiendo los bits del índice:
+
+```python
+def bit_reverse(index, width):
+    """Invierte los bits de un índice.
+    bit_reverse(1, 3) = 4  (001 → 100)
+    bit_reverse(3, 3) = 6  (011 → 110)
+    """
+    result = 0
+    for _ in range(width):
+        result = (result << 1) | (index & 1)
+        index >>= 1
+    return result
+
+# Para secuencia de 8 elementos (3 bits):
+PERM = [bit_reverse(i, 3) for i in range(8)]
+# Resultado: [0, 4, 2, 6, 1, 5, 3, 7]
+```
+
+El modelo no tiene acceso a esta función. La descubre puramente a través de atención posicional y optimización por gradiente. Y cuando lo hace, sus pesos de atención muestran exactamente el patrón *butterfly* del FFT — los puntos fijos (0, 2, 5, 7 se mapean a sí mismos) y los pares de intercambio (1↔4, 3↔6) emergen orgánicamente.
+
+## Qué podemos aprender
+
+MacMind no es útil en términos prácticos — nadie va a reemplazar PyTorch con HyperTalk. Pero como herramienta pedagógica es brillante por varias razones:
+
+1. **Desmitifica el transformer**: Cuando puedes abrir un campo de HyperCard y leer los 1.216 números que componen toda la "inteligencia" del modelo, la magia desaparece. Lo que queda es matemática comprensible.
+
+2. **Demuestra que el mecanismo es universal**: Backpropagation + atención funcionan igual en un 68030 que en un H100. No hay nada inherentemente moderno en los fundamentos.
+
+3. **Hace visible lo invisible**: En un modelo de billones de parámetros, la atención es una abstracción. En uno de 1.216, puedes contemplar la matriz 8×8 y ver exactamente qué posición atiende a cuál. Es inspectable por diseño.
+
+4. **Recuerda que la computación es acumulativa**: El FFT,发明ado en 1965. Backpropagation, popularizado en 1986. Attention, 2017. Cada capa se apoya en las anteriores. Este proyecto las conecta todas en un solo objeto tangible.
+
+## Mi veredicto
+
+MacMind es el tipo de proyecto que me recuerda por qué me gusta la programación. No optimiza un pipeline de producción ni escala a millones de usuarios. Hace algo más valioso: hace tangible algo abstracto. Un transformer entrenado a mano, en un lenguaje de 1987, en hardware que ya era antiguo cuando yo nací, y que descubre por sí solo la misma estructura matemática que los humanos formalizaron hace 60 años.
+
+La frase del autor lo resume bien: *"La diferencia es escala, no naturaleza"*. Los mismos gradientes, las mismas multiplicaciones de matrices, el mismo proceso de aprender de ejemplos. Solo que aquí puedes leer cada número, entender cada paso, y ejecutarlo en una máquina donde cada operación es deliberada y lenta.
+
+Si estás aprendiendo sobre transformers y la abstracción de PyTorch te abruma, dedica una hora a leer el código de MacMind. No hay capas ocultas, no hay frameworks que compilan a C. Solo matemática, expresada de la forma más honesta posible.
+
+---
+
+*MacMind es un proyecto de [Sean Lavigne](https://fallingdata.zone) y está disponible en [github.com/SeanFDZ/macmind](https://github.com/SeanFDZ/macmind). El repositorio incluye la pila pre-entrenada, una pila en blanco para entrenar desde cero, y un validador Python/NumPy.*
