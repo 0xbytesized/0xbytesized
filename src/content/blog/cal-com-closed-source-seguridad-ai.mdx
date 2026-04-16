@@ -7,7 +7,7 @@ excerpt: "Cal.com pasa a closed source por amenazas de seguridad con IA. Nace Ca
 
 Cuando un proyecto con 41.000 estrellas en GitHub decide cerrar su código, la comunidad se remueve. Y cuando el argumento principal es "la IA nos ha hecho vulnerables", el debate se enciende por todos lados. Eso es exactamente lo que ha pasado esta semana con Cal.com.
 
-Bailey Pumfleet, CEO de Cal.com, publicó el 14 de abril un post que muchos no esperaban: **Cal.com pasa a closed source**. Después de cinco años como proyecto open source, la empresa toma la decisión de cerrar su código al público. La razón, según su announcement, es que la IA ha cambiado radicalmente las reglas del juego en seguridad.
+Bailey Pumfleet, CEO de Cal.com, publicó el 14 de abril un post que muchos no esperaban: **Cal.com pasa a closed source**. Después de cinco años como proyecto open source, la empresa toma la decisión de cerrar su código al público. La razón, según su anuncio, es que la IA ha cambiado radicalmente las reglas del juego en seguridad.
 
 ## El argumento de Cal.com
 
@@ -54,7 +54,7 @@ En Cal.diy, toda esta lógica desapareció. No hay tiers, no hay checks. Las fea
 
 ## El contraargumento: cerrar el código no quita la superficie de ataque
 
-La empresa Strix.ai publicó un response article el mismo día con un título directo: **"Open Source Isn't Dead"**. Su argumento central: cerrar el código fuente no elimina la superficie de ataque. La seguridad por oscuridad no es seguridad.
+La empresa Strix.ai publicó un artículo en respuesta el mismo día con un título directo: **"Open Source Isn't Dead"**. Su argumento central: cerrar el código fuente no elimina la superficie de ataque. La seguridad por oscuridad no es seguridad.
 
 Y tienen un punto. Cuando despliegas una aplicación web, los endpoints están ahí, visibles o no. Las APIs REST, los webhooks, los formularios de login —todo eso es accesible desde fuera del código. Un escáner de vulnerabilidades no necesita el source code para encontrar un SQL injection o un CSRF. Puede fuzzear endpoints igualmente.
 
@@ -143,7 +143,7 @@ Cal.com tiene derecho a cerrar su código. Es su proyecto y su responsabilidad c
 
 La seguridad por oscuridad funciona como puerta temporal: retrasa al atacante, pero no lo detiene. La historia de la seguridad informática demuestra una y otra vez que el código cerrado también tiene vulnerabilidades graves — solo tardan más en descubrirse. Y cuando se descubren, suelen llevar más tiempo en parchearse porque hay menos ojos sobre ellas.
 
-La verdadera cuestión no es si el código es abierto o cerrado. Es si tienes un proceso de seguridad robusto: auditorías, bug bounties, escaneo continuo, y una cultura de parchear rápido. OpenSSL era cerrado en los hechos (pocos contribuidores, poca transparencia) cuando apareció Heartbleed. El problema no era la licencia; era la falta de revisión.
+La verdadera cuestión no es si el código es abierto o cerrado. Es si tienes un proceso de seguridad robusto: auditorías, bug bounties, escaneo continuo y una cultura de parchear rápido. OpenSSL era cerrado en los hechos (pocos contribuidores, poca transparencia) cuando apareció Heartbleed. El problema no era la licencia; era la falta de revisión.
 
 Cal.diy nace con buena intención, pero recortado —sin las features que hacen útil el producto en producción— y etiquetado como "no para uso serio". El mensaje entre líneas es claro: si quieres seguridad, tienes que pagar. Si quieres libertad, la seguridad corre por tu cuenta.
 

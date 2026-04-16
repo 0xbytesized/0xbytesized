@@ -2,7 +2,7 @@
 title: "Un 6502 emulador en SQL: cuando Postgres se viste de CPU"
 date: 2026-04-15T10:05
 tags: ["postgres", "sql", "emulacion", "hardware", "retro"]
-excerpt: "Alguien implementó el MOS 6502 entero en PostgreSQL. Registros como tablas, opcodes como funciones, y 64KB de RAM en filas. Pura locura técnica."
+excerpt: "Alguien implementó el MOS 6502 entero en PostgreSQL. Registros como tablas, opcodes como funciones y 64KB de RAM en filas. Pura locura técnica."
 ---
 
 Hay proyectos que nacen de la necesidad. Otros, de la curiosidad enfermiza. Y luego está `pg_6502`: un emulador completo del microprocesador MOS 6502 —el cerebro del NES, el Commodore 64, la Apple II— escrito enteramente en SQL dentro de PostgreSQL.
@@ -50,7 +50,7 @@ CREATE TABLE pg6502.mem (
 );
 ```
 
-Leer un byte que no existe devuelve 0, simulando el comportamiento "open bus" del hardware real. Las lecturas de 16 bits little-endian son una función que concatenación dos lecturas de 8 bits:
+Leer un byte que no existe devuelve 0, simulando el comportamiento "open bus" del hardware real. Las lecturas de 16 bits little-endian son una función que concatena dos lecturas de 8 bits:
 
 ```sql
 CREATE OR REPLACE FUNCTION pg6502.mem_read16(p_addr INT)

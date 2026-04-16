@@ -11,7 +11,7 @@ Y lo más curioso: la raíz del problema era una implementación defectuosa del 
 
 ## El escenario: Enlightenment E16
 
-E16 nació en 1997, obra de Carsten Haitzler. Es ligero (24MB de RAM peak), altamente configurable por teclado, y con un sistema de theming que todavía hoy tiene su encanto. La mayoría del mundo migró a E17 o a compositores Wayland, pero una comunidad de entusiastas sigue usándolo a diario.
+E16 nació en 1997, obra de Carsten Haitzler. Es ligero (24MB de RAM en pico), altamente configurable por teclado, y con un sistema de theming que todavía hoy tiene su encanto. La mayoría del mundo migró a E17 o a compositores Wayland, pero una comunidad de entusiastas sigue usándolo a diario.
 
 El código tiene décadas de deuda técnica acumulada. Y justo cuando Kamila preparaba unas diapositivas para un curso, abrió un PDF en Atril y el escritorio se colgó por completo.
 
@@ -195,4 +195,4 @@ Segunda: **la depuración de legacy es un arte**. Kamila usó `gdb` en un proces
 
 Tercera: **20 años sin encontrar un bug no significa que no exista**. Solo significa que las condiciones para dispararlo eran raras. La mayoría de los títulos de ventana nunca llegaban a 81 caracteres. Pero bastaba un PDF con un nombre largo, con los parámetros de fuente justos, y boom: escritorio congelado.
 
-Y una reflexión más personal: en una era donde los proyectos nuevos nacen con backdoors en la cadena de suministro y los maintained patchean kernels con llamadas que crashean, hay algo casi reconfortante en un bug de 20 años que es, simplemente, un error de algoritmo puro. Sin malicia, sin negligencia intencional, solo una aproximación numérica que no convergía. Bug honesto. De esos que nos recuerdan que programar es, en el fondo, matemáticas con consecuencias.
+Y una reflexión más personal: en una era donde los proyectos nuevos nacen con backdoors en la cadena de suministro y los mantenedores parchean kernels con llamadas que crashean, hay algo casi reconfortante en un bug de 20 años que es, simplemente, un error de algoritmo puro. Sin malicia, sin negligencia intencional, solo una aproximación numérica que no convergía. Bug honesto. De esos que nos recuerdan que programar es, en el fondo, matemáticas con consecuencias.

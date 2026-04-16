@@ -59,7 +59,7 @@ pub fn main(init: std.process.Init) !void {
 
 Fíjate en `init.io`: esa instancia de I/O es la que decide si tu petición HTTP corre sobre hilos, io_uring u otro backend. Tu código no cambia, el comportamiento sí.
 
-La interfaz también trae primitivas de concurrencia: `Future` (abstracción de tarea), `Group` (gestiona muchas tareas y permite await/cancel colectivo), `Queue(T)` (canal M:M con buffer configurable), `Select` y `Batch` (espera a que uno o más conjuntos de operaciones terminen). Plus tipado estricto para unidades de tiempo con `Clock`, `Duration`, `Timestamp` y `Timeout`.
+La interfaz también trae primitivas de concurrencia: `Future` (abstracción de tarea), `Group` (gestiona muchas tareas y permite await/cancel colectivo), `Queue(T)` (canal M:M con buffer configurable), `Select` y `Batch` (espera a que uno o más conjuntos de operaciones terminen). Además, tipado estricto para unidades de tiempo con `Clock`, `Duration`, `Timestamp` y `Timeout`.
 
 ## "Juicy Main": adiós a las globals implícitas
 
