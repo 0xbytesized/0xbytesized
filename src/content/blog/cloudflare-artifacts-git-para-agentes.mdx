@@ -1,0 +1,167 @@
+---
+title: "Cloudflare Artifacts: Git como almacén para agentes"
+date: 2026-04-17T07:05
+tags: ["cloudflare", "git", "agents", "wasm", "zig"]
+excerpt: "Cloudflare lanza Artifacts: almacenamiento versionado que habla Git para agentes. Repos programáticos, forks baratos y motor Zig→Wasm de 100KB."
+---
+
+Cloudflare acaba de presentar **Artifacts**, y aunque el nombre suene genérico, lo que hay debajo es bastante interesante: un sistema de almacenamiento versionado que expone el protocolo Git y está diseñado desde cero para que los agentes de IA puedan crear, clonar, forkear y pushear repositorios de forma programática. No es otro hosting de código — es una pieza de infraestructura que convierte a Git en un primitivo de persistencia para workflows agent-first.
+
+## Qué es exactamente Artifacts
+
+La idea central es simple: los agentes generan muchísimo código y estado, y las plataformas de control de versiones tradicionales (GitHub, GitLab) no están construidas para esa escala. Un agente que nunca duerme, que trabaja en varios issues a la vez y que genera decenas de commits por minuto necesita un sistema que pueda crear millones de repos sin fricción.
+
+Artifacts ofrece:
+
+- **Repos programáticos**: crea un repo con una llamada a la API, obtén una URL remota y un token, y ya cualquier cliente Git puede operar contra él.
+- **Forks instantáneos**: forkea un repo en una copia aislada, con opción de solo lectura.
+- **Import desde cualquier remoto**: importa un repositorio de GitHub con una sola llamada.
+- **REST API + Workers API**: para entornos donde no tienes un cliente Git disponible (serverless, Lambda, Workers).
+- **Escala masiva**: decenas de millones de repos por namespace, gracias a Durable Objects.
+
+Veamos cómo se usa desde un Worker:
+
+```typescript
+interface Env {
+  ARTIFACTS: Artifacts
+}
+
+export default {
+  async fetch(request: Request, env: Env) {
+    // Crear un repo nuevo para esta sesión de agente
+    const repo = await env.ARTIFACTS.create(
+      `agent-session-${crypto.randomUUID()}`
+    )
+    // El agente recibe la URL y el token para operar con git
+    return Response.json({
+      remote: repo.remote,
+      token: repo.token,
+    })
+  },
+}
+```
+
+Y desde la terminal, el agente simplemente hace:
+
+```bash
+git clone https://x:${TOKEN}@abc123.artifacts.cloudflare.net/git/mi-repo.git
+```
+
+Eso es todo. Un repo vacío creado al vuelo, compatible con cualquier cliente Git estándar.
+
+## Importar y forkear: el flujo de trabajo real
+
+Lo realmente potente es importar un repo existente y crear forks aislados. Imagina que tu agente va a revisar un PR — puedes importar el repo base y crear un fork de solo lectura para trabajar sin riesgo:
+
+```typescript
+export default {
+  async fetch(request: Request, env: Env) {
+    // Importar desde GitHub
+    const { remote, token } = await env.ARTIFACTS.import({
+      source: {
+        url: "https://github.com/cloudflare/workers-sdk",
+        branch: "main",
+      },
+      target: {
+        name: "workers-sdk",
+      },
+    })
+
+    // Obtener handle al repo importado
+    const repo = await env.ARTIFACTS.get("workers-sdk")
+
+    // Forkear a una copia aislada de solo lectura
+    const fork = await repo.fork("workers-sdk-review", {
+      readOnly: true,
+    })
+
+    return Response.json({
+      remote: fork.remote,
+      token: fork.token,
+    })
+  },
+}
+```
+
+Este patrón —un repo por sesión de agente, un fork por tarea— es exactamente lo que los equipos de Cloudflare usan internamente. Los agentes persisten tanto el estado del filesystem como el historial de prompts en un repo Artifacts por sesión. ¿Quieres que un compañero revise lo que hizo tu agente? Mandas la URL del fork. ¿Quieres volver atrás en el tiempo? El historial de Git lo permite, incluyendo el estado de los prompts.
+
+## No es solo control de versiones
+
+Aquí hay una intuición que merece la pena destacar: el modelo de datos de Git sirve para mucho más que código. Cualquier cosa que necesites trackear, revertir y diff —configuración por cliente, estado de sesiones, prompts de agentes, artefactos de builds— puede vivir en un repo Artifacts.
+
+Cloudflare lo usa internamente para:
+
+- **Persistir el estado del sandbox** sin montar block storage permanente.
+- **Compartir sesiones** entre compañeros, con capacidad de time-travel sobre el estado de archivos y prompts.
+- **Forkear sesiones** desde cualquier punto para que otro agente o persona continúe el trabajo.
+
+Esto cambia la narrativa: Git no es solo para source control, es un *primitivo de persistencia versionada*.
+
+## Bajo el capó: Zig, Wasm y Durable Objects
+
+La parte más fascinante desde el punto de vista técnico es la implementación. Cloudflare necesitaba un motor Git que pudiera correr dentro de Workers, así que se construyeron uno **en Zig, compilado a Wasm**, que pesa apenas ~100KB.
+
+El motor implementa desde cero:
+
+- SHA-1
+- zlib inflate/deflate
+- Delta encoding/decoding
+- Pack parsing
+- El protocolo inteligente HTTP de Git (v1 y v2)
+
+Todo sin dependencias externas más que la biblioteca estándar de Zig. El módulo Wasm se comunica con el host JavaScript a través de una interfaz minimalista: 11 funciones importadas para operaciones de almacenamiento (`host_get_object`, `host_put_object`, etc.) y una para streaming de salida (`host_emit_bytes`).
+
+La arquitectura completa:
+
+- **Workers** actúan como frontend, manejando auth y routing.
+- **Durable Objects** almacenan cada repo en su propia instancia aislada, con SQLite como backend.
+- **R2** guarda snapshots.
+- **KV** trackea tokens de autenticación.
+
+Los objetos Git grandes se chunked en filas de SQLite (límite de 2MB por fila). Y en vez de calcular deltas propios, los deltas crudos y los hashes base se persisten junto al objeto resuelto — en el fetch, si el cliente ya tiene el objeto base, el motor Zig emite el delta en vez del objeto completo, ahorrando ancho de banda y memoria.
+
+## ArtifactFS: git clone pero async
+
+Para repos grandes (el artículo menciona un framework web que pesa 2.4 GB y tarda ~2 minutos en clonar), Cloudflare ha abierto **ArtifactFS**, un driver de filesystem que monta un repo Git lo más rápido posible, hidratando el contenido de los archivos bajo demanda.
+
+El flujo:
+
+1. Hace un **blobless clone**: descarga el árbol de archivos y refs, pero no el contenido.
+2. En background, un daemon ligero empieza a **hidratar** los archivos concurrentemente.
+3. **Prioriza** los archivos que los agentes necesitan primero: `package.json`, `go.mod`, config y código. Desprioriza binarios e imágenes.
+4. Si un agente intenta leer un archivo que aún no está hidratado, la lectura se bloquea hasta que esté disponible.
+
+ArtifactFS funciona con cualquier remoto Git, no solo con Artifacts. Está disponible en [github.com/cloudflare/artifact-fs](https://github.com/cloudflare/artifact-fs).
+
+Un ejemplo conceptual del flujo:
+
+```bash
+# Montar un repo grande sin esperar al clone completo
+# (el CLI exacto puede variar según la versión de artifact-fs)
+artifactfs mount https://github.com/mi-org/repo-grande /mnt/repo
+
+# El agente puede empezar a trabajar inmediatamente
+# Los archivos se van hidratando en background
+ls /mnt/repo/src/         # El árbol ya está disponible
+cat /mnt/repo/package.json  # Se bloquea brevemente si no está hidratado
+```
+
+La estimación de Cloudflare: recortar ~90-100 segundos del arranque de cada sandbox, multiplicado por miles de ejecuciones al mes, suma una cantidad significativa de horas de compute ahorradas.
+
+## Soporte para git-notes
+
+Un detalle que me parece muy acertado: Artifacts soporta **git-notes** de forma nativa. Los notes permiten adjuntar metadatos a objetos Git sin mutarlos. Para agentes, esto significa poder añadir atribución (qué agente hizo qué), prompts asociados y metadata de contexto directamente en el repo, sin tocar los commits originales.
+
+## Mi veredicto
+
+Artifacts me parece una de las pocas propuestas recientes en el ecosistema de agentes que realmente merece la pena. No es otro wrapper sobre LLMs — es infraestructura real que resuelve un problema que existe hoy: ¿dónde viven los millones de repos efímeros que los agentes generan por sesión?
+
+La decisión de hablar Git en vez de inventar un protocolo nuevo es brillante. Los modelos de IA conocen Git. Los harnesses saben usar Git. No necesitas SDKs nuevos ni MCP servers para comunicarte con tu almacenamiento. Y el motor Zig→Wasm de 100KB es un ejercicio de ingeniería impresionante — casi arte minimalista.
+
+Lo que me genera dudas es el modelo de pricing y disponibilidad. Está en beta privada para planes Workers pagados, con beta pública prevista para principios de mayo. Si el pricing es razonable para crear miles de repos efímeros, podría convertirse en un estándar de facto para agent harnesses. Si es caro, la gente simplemente seguirá usando repos temporales en GitHub o GitLab y limpiando a mano.
+
+Artifacts también plantea una pregunta más profunda: ¿debería Git ser un primitivo de infraestructura genérico, no solo para código? La respuesta de Cloudflare es claramente sí, y tienen un caso de uso interno que lo demuestra. Veremos si la comunidad de desarrollo adopta esa misma perspectiva.
+
+---
+
+*Fuente: [blog.cloudflare.com/artifacts-git-for-agents-beta](https://blog.cloudflare.com/artifacts-git-for-agents-beta/) — 16 de abril de 2026*
