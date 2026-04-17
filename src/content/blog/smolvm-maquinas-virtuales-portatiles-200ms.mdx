@@ -1,0 +1,182 @@
+---
+title: "Smolvm: máquinas virtuales portátiles en 200ms"
+date: 2026-04-17T23:50
+tags: ["rust", "virtualizacion", "seguridad", "developer-tools", "contenedores"]
+excerpt: "Smolvm arranca VMs en menos de 200ms, las empaqueta en un solo archivo y las ejecuta en macOS y Linux. Aislamiento real sin el peso de Docker."
+---
+
+Los contenedores son rápidos, sí. Pero comparten tu kernel. Y eso, en
+infraestructura moderna, es un problema — no una opinión, un hecho con
+CVEs de por medio. Docker, Podman, containerd: todos corren procesos
+sobre el mismo kernel del host, separados namespaces de por medio.
+Funciona… hasta que no.
+
+**Smolvm** apareció esta semana en Hacker News con 195 puntos y 82
+comentarios, y propone algo que suena contradictorio: máquinas virtuales
+que arrancan en menos de 200 milisegundos. No es Docker, no es QEMU, no
+es Firecracker en
+macOS. Es un proyecto Rust llamado
+[smol-machines/smolvm](https://github.com/smol-machines/smolvm) que
+usa libkrun como hipervisor y compila un binario que levanta VMs con
+aislamiento real — kernel propio incluido — en tiempos de contenedor.
+
+## ¿Qué es exactamente smolvm?
+
+Smolvm es una CLI que gestiona y ejecuta micro-VMs de Linux con tres
+promesas centrales:
+
+1. **Arranque sub-200ms**: usa un kernel custom liviano (libkrunfw) que
+   solo incluye lo necesario para arrancar un entorno userland Linux.
+2. **Multiplataforma nativo**: en macOS usa Hypervisor.framework (lo
+   mismo que usa Docker Desktop por debajo), en Linux usa KVM. Sin
+   daemon, sin VM intermedia.
+3. **Artefactos portátiles**: puedes empaquetar una VM completa con su
+   estado en un archivo `.smolmachine` y ejecutarlo en cualquier
+   máquina de la misma arquitectura.
+
+La versión actual es v0.5.17, publicada el mismo 17 de abril de 2026, y
+ya suma 812 estrellas en GitHub. No es vaporware.
+
+## Cómo se usa en la práctica
+
+La instalación es directa:
+
+```bash
+curl -sSL https://smolmachines.com/install.sh | bash
+```
+
+Pero donde smolvm brilla es en los patrones de uso. Por ejemplo,
+ejecutar código no fiable con aislamiento real:
+
+```bash
+# Red desactivada por defecto. Solo permites lo que necesitas.
+smolvm machine run --net --image alpine \
+  --allow-host registry.npmjs.org \
+  -- wget -q -O /dev/null https://registry.npmjs.org
+# ↑ Funciona. Si intentas conectar a google.com, se bloquea.
+```
+
+O empaquetar un entorno completo como archivo portable:
+
+```bash
+# Creas un artefacto con Python 3.12 preinstalado
+smolvm pack create --image python:3.12-alpine -o ./python312
+
+# Lo ejecutas directamente, sin instalar nada en el host
+./python312 run -- python3 --version
+# Python 3.12.x
+```
+
+Eso es un solo archivo binario que contiene una VM completa. Lo copias
+a otra máquina y funciona. No hay daemon, no hay runtime que instalar,
+no hay pull de imágenes que falle a mitad.
+
+También puedes declarar configuraciones con un `Smolfile` en TOML:
+
+```toml
+image = "python:3.12-alpine"
+net = true
+
+[network]
+allow_hosts = ["api.stripe.com", "db.example.com"]
+
+[dev]
+init = ["pip install -r requirements.txt"]
+volumes = ["./src:/app"]
+
+[auth]
+ssh_agent = true
+```
+
+Y arrancarlo con `smolvm machine start`, teniendo todo declarado en un
+solo archivo en lugar de un Dockerfile + docker-compose.yml +
+Dockerfile.prod.
+
+## Por qué esto importa: el problema del kernel compartido
+
+La diferencia técnica clave entre un contenedor y una smolvm no es la
+velocidad — ambos son rápidos — sino el modelo de aislamiento. Un
+contenedor comparte el kernel del host. Si hay un bug en el kernel, un
+proceso malicioso puede escapar del namespace. Esto ha pasado antes
+(CVE-2024-21626 runc, CVE-2022-0185 (heap overflow
+en el kernel), y la lista sigue creciendo).
+
+Smolvm le da a cada workload su propio kernel. No hay namespace que
+romper porque literalmente no comparte memoria con el host. Si el
+proceso invitado explota un bug del kernel invitado, el daño se queda
+dentro de la VM. Es lo que Firecracker hace en AWS, pero accesible desde
+tu portátil sin infraestructura cloud.
+
+La comparativa que publica el proyecto es reveladora:
+
+| | smolvm | Contenedores | QEMU | Firecracker |
+|---|---|---|---|---|
+| Aislamiento | VM por workload | Namespace (kernel compartido) | VM separada | VM separada |
+| Arranque | \<200ms | ~100ms | 15-30s | \<125ms |
+| macOS nativo | Sí | Vía Docker VM | Sí | No |
+| Artefacto portable | `.smolmachine` | Imágenes (necesitan daemon) | No | No |
+
+Firecracker arranca más rápido, pero no funciona en macOS. QEMU funciona
+en macOS pero tarda 15-30 segundos. Los contenedores son rápidos pero
+comparten kernel. Smolvm ocupa un punto en el espacio de diseño que
+antes estaba vacío.
+
+## SSH agent sin exponer tus claves
+
+Un detalle que vale la pena mencionar: smolvm puede reenviar tu SSH
+agent al interior de la VM sin copiar las claves. El hipervisor
+garantiza que el proceso invitado no puede extraer la clave privada del
+socket:
+
+```bash
+smolvm machine run --ssh-agent --net --image alpine \
+  -- sh -c "apk add -q openssh-client && ssh-add -l"
+```
+
+Esto es relevante para pipelines de CI/CD donde necesitas clonar
+repositorios privados dentro de un entorno aislado sin montar volúmenes
+con `.ssh` en texto plano.
+
+## Bajo el capó
+
+Smolvm usa **libkrun** como VMM (Virtual Machine Monitor con la interfaz
+de libkrunfw para el kernel), que a su vez se apoya en:
+
+- **macOS**: `Hypervisor.framework` de Apple, la misma API que usa
+  Docker Desktop y UTM.
+- **Linux**: KVM vía `/dev/kvm`, el estándar de virtualización del
+  kernel Linux.
+
+Los valores por defecto son sensatos: 4 vCPUs, 8 GiB de RAM con
+virtio-balloon elástico (la VM usa solo lo que necesita), y
+almacenamiento persistente por defecto. No hay que configurar nada para
+empezar, pero todo es configurable.
+
+Las limitaciones actuales: solo TCP/UDP (sin ICMP), montaje de
+volúmenes solo a nivel de directorios, y en macOS el binario necesita
+firmarse. Nada que frene el uso diario, pero cosas a tener en cuenta
+si quieres reemplazar workflows de red complejos.
+
+## Mi veredicto
+
+Smolvm me parece una de esas herramientas que resuelven un problema real
+que mucha gente normaliza: **los contenedores no son suficientemente
+seguros para código no fiable**. Y lo hacen sin sacrificar la velocidad
+ni la ergonomía que hace útiles a los contenedores.
+
+El formato `.smolmachine` es probablemente la idea más potente del
+proyecto. Poder enviar un archivo y que contenga TODO — kernel,
+userland, estado — sin que el receptor necesite instalar Docker ni
+descargar capas de imagen, cambia la forma en que distribuyes
+herramientas. Imagina mandar un binary de tests de integración que
+levantan su propia base de datos, su propia red, todo autocontenido.
+
+¿Qué le falta? Ecosistema. Docker tiene décadas de imágenes base, CI/CD
+integrado, orquestación. Smolvm está empezando. Pero el proyecto se
+mueve rápido (v0.5.17 ya), el código es Rust, la licencia es
+Apache-2.0, y los ejemplos — incluyendo un doom-web que corre en una
+VM — sugieren que la comunidad está encontrando usos creativos.
+
+Si trabajas con sandboxing, CI/CD aislado, o simplemente quieres dejar
+de compartir kernel con procesos de dudosa procedencia, pruébalo. El
+arranque de 200ms es sorprendente la primera vez.
