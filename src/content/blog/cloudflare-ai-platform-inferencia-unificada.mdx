@@ -1,0 +1,125 @@
+---
+title: "Cloudflare AI Platform: una API para gobernarlos a todos"
+date: 2026-04-17T11:28
+tags: ["cloudflare", "ai", "agents", "workers", "inference"]
+excerpt: "Cloudflare unifica 70+ modelos de 12 proveedores bajo un solo API.run(). Failover automático, streaming resiliente y BYOM con Cog. El SDK que los agentes necesitaban."
+---
+
+Si llevas meses cambiando entre la API de OpenAI, la de Anthropic y la de media docena de proveedores más solo para mantener tu agente funcionando, Cloudflare acaba de anunciar algo que te va a interesar. Se llama **AI Platform**, y la idea es tan simple como ambiciosa: una sola API para acceder a cualquier modelo de cualquier proveedor, con failover automático, buffering de streaming y un catálogo de más de 70 modelos.
+
+## El problema que intenta resolver
+
+Construir un agente de IA hoy es como hacer de DJ con tres reproductores de marcas distintas y un mezclador que no existe. Tu agente de soporte al cliente necesita un modelo rápido y barato para clasificar el mensaje, un modelo de razonamiento para planificar la respuesta y un modelo ligero para ejecutar tareas individuales. Eso significa al menos tres providers, tres SDKs, tres sistemas de facturación y —cuando uno se cae— una avalancha de errores en cadena.
+
+Un chatbot hace una llamada de inferencia por prompt. Un agente puede encadenar diez. Si un proveedor añade 50ms de latencia, el agente acumula 500ms. Si una petición falla, no es un simple retry: es toda la cadena aguas abajo que se rompe.
+
+Cloudflare ha estado trabajando en esto desde que lanzó AI Gateway y Workers AI. Ahora junta todas las piezas bajo un mismo paraguas.
+
+## Una API, todos los modelos
+
+La pieza central es que el binding `AI.run()` que ya usabas con Workers AI ahora sirve también para llamar modelos de terceros. Cambiar de un modelo alojado en Cloudflare a uno de OpenAI o Anthropic es, literalmente, cambiar una línea:
+
+```typescript
+// Antes: modelo alojado en Cloudflare
+const fast = await env.AI.run("@cf/moonshotai/kimi-k2.5", {
+  prompt: "Clasifica este tickets como bug o feature"
+});
+
+// Ahora: mismo binding, modelo de Anthropic
+const deep = await env.AI.run("anthropic/claude-opus-4-6", {
+  input: "Planifica los pasos para resolver este bug"
+}, {
+  gateway: { id: "default" }
+});
+```
+
+El catálogo incluye más de 70 modelos de 12+ proveedores: OpenAI, Anthropic, Google, Alibaba Cloud, AssemblyAI, Bytedance, MiniMax, y otros. Y están incorporando modelos de imagen, vídeo y voz, así que no es solo texto.
+
+## Failover sin escribir failover
+
+Aquí es donde se pone interesante para agentes de producción. Si un modelo está disponible en múltiples proveedores y uno se cae, AI Gateway redirige automáticamente al proveedor alternativo sin que escribas un solo `try/catch`:
+
+```typescript
+// Tu código no cambia nada
+const result = await env.AI.run("openai/gpt-4.1", {
+  messages: [{ role: "user", content: "Resume este PR" }]
+}, {
+  gateway: { id: "default" }
+});
+
+// AI Gateway maneja internamente:
+// 1. Intenta proveedor A → timeout
+// 2. Reintenta automáticamente en proveedor B
+// 3. Tu agente recibe la respuesta sin enterarse
+```
+
+Para agentes que funcionan con el Agents SDK de Cloudflare, hay otra característica clave: **buffering de streaming resiliente**. Si tu agente se interrumpe a mitad de una inferencia streaming, puede reconectar a AI Gateway y recuperar la respuesta sin repetir la llamada ni pagar dos veces por los mismos tokens. Esto, combinado con el checkpointing del Agents SDK, hace que el usuario final nunca note que hubo un problema.
+
+## Control de costes centralizado
+
+Llamar a 3.5 modelos de media a través de múltiples proveedores significa que ningún provider te da una visión holística de tu gasto en IA. AI Gateway te permite añadir metadata personalizada a cada petición para desglosar costes como tú necesites:
+
+```typescript
+await env.AI.run("@cf/meta/llama-4-scout", {
+  prompt: "Genera test para esta función"
+}, {
+  metadata: {
+    equipo: "platform",
+    entorno: "produccion",
+    workflow: "code-review-automated"
+  }
+});
+```
+
+Luego en el dashboard puedes ver el desglose por equipo, por workflow, por cliente — lo que tenga sentido para tu negocio.
+
+## Trae tu propio modelo con Cog
+
+No todo son modelos públicos. A veces necesitas un modelo fine-tuneado con tus datos o uno optimizado para tu caso de uso. Para eso, Cloudflare está integrando **Cog** de Replicate, una herramienta que ya conoce quien haya desplegado modelos custom en Replicate.
+
+La idea es sencilla: defines las dependencias en un `cog.yaml` y tu código de inferencia en un archivo Python, y Cog se encarga de empaquetarlo todo (CUDA, versiones de Python, carga de pesos) en un contenedor que luego subes a Workers AI:
+
+```yaml
+# cog.yaml
+build:
+  python_version: "3.13"
+  python_requirements: requirements.txt
+predict: "predict.py:Predictor"
+```
+
+```python
+# predict.py
+from cog import BasePredictor, Input
+import torch
+
+class Predictor(BasePredictor):
+    def setup(self):
+        self.model = torch.load("mi-modelo-finetuned.pth")
+
+    def predict(self, prompt: str = Input(description="Instrucción")) -> str:
+        tokens = self.model.encode(prompt)
+        output = self.model.generate(tokens, max_new_tokens=256)
+        return self.model.decode(output[0])
+```
+
+Lanza `cog build`, sube el contenedor y accedes a tu modelo con el mismo `AI.run()`. Según Cloudflare, están trabajando en APIs públicas y comandos de Wrangler para gestionar todo desde CLI, además de cold starts más rápidos через GPU snapshotting.
+
+Un dato curioso: el equipo de Replicate se ha fusionado oficialmente con el equipo de AI Platform de Cloudflare. No son equipos separados. Todos los modelos de Replicate van a estar disponibles a través de AI Gateway, y los modelos que desplegabas en Replicate podrás alojarlos en Workers AI.
+
+## Latencia: el camino más rápido al primer token
+
+Para agentes en tiempo real, la latencia que el usuario percibe no es el tiempo total de inferencia sino el **time to first token**. Si la inferencia total tarda 3 segundos pero el primer token llega 50ms antes, tu agente se siente ágil en vez de lento.
+
+Aquí es donde Cloudflare tiene una ventaja arquitectónica real: su red de 330 ciudades posiciona AI Gateway cerca tanto de los usuarios como de los endpoints de inferencia. Y cuando llamas a modelos alojados en Workers AI a través de AI Gateway, no hay salto por Internet público: tu código y la inferencia corren en la misma red global.
+
+## Mi opinión
+
+Me parece un movimiento inteligente y bien ejecutado. El problema que describen —fragmentación de providers, falta de observabilidad de costes, cascadas de fallos en agentes— es real y lo sufre cualquiera que haya construido un agente de producción con más de un modelo.
+
+El hecho de que hayan conseguido que los providers acepten una capa de abstracción por encima es notable. Normalmente cada uno quiere ser tu endpoint único, no uno más en un catálogo. Pero el valor para el desarrollador es innegable: un solo binding, una sola línea de crédito, un solo dashboard.
+
+Lo que me genera más escepticismo es el tema de BYOM con Cog. La promesa es buena, pero hoy está en fase de design partner y no hay APIs públicas ni CLI. Si Cloudflare logra hacer que subir tu propio modelo sea tan fácil como hacer `wrangler deploy`, será un cambio de juego. Si se queda en promesa empresarial, será una nota al pie.
+
+También me llama la atención la fusión con Replicate. Si se ejecuta bien, Cloudflare hereda una comunidad enorme de ML practitioners que ya usaban Cog. Si se ejecuta mal, los usuarios de Replicate pueden sentir que perdieron una plataforma independiente.
+
+En resumen: si estás construyendo agentes y no quieres atarte a un solo provider, AI Platform merece una evaluación seria. El failover automático y el buffering de streaming solos ya justifican el cambio.
