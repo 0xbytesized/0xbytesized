@@ -1,0 +1,68 @@
+---
+title: "Claude Design: cuando la IA se pone a diseñar"
+date: 2026-04-18T07:30
+tags: ["anthropic", "claude", "diseño", "agentes", "figma"]
+excerpt: "Anthropic lanza Claude Design: prototipos, wireframes y presentaciones conversacionales con Opus 4.7. Design systems automáticos, export a Canva y handoff a Claude Code. ¿Amenaza para Figma o herramienta más?"
+---
+
+¿Diseñas en Figma? ¿O llevas la idea en la cabeza pero nunca la sacas porque tocar Sketch te da urticaria? Anthropic acaba de lanzar **Claude Design**, y entra directo a competir con el workflow de diseño visual.
+
+## Qué es Claude Design
+
+Es un producto de Anthropic Labs que te permite crear prototipos, wireframes, presentaciones, one-pagers y material visual conversando con Claude. Lo mueves con Opus 4.7, su modelo con mejor visión hasta la fecha.
+
+El flujo es simple: describes lo que necesitas, Claude genera una primera versión, y refinas desde ahí. Puedes comentar sobre elementos concretos, editar texto in-place, o usar sliders que el propio Claude genera para ajustar espaciado, color o layout en tiempo real.
+
+No es solo "genera una imagen bonita". Es un canvas interactivo donde iteras.
+
+## Lo que lo diferencia de un generador de imágenes
+
+Lo interesante no es que genere algo visual. Es cómo integra el resto del stack de Anthropic:
+
+**Design system automático.** Durante el onboarding, Claude lee tu codebase y tus archivos de diseño existentes. A partir de ahí, cada proyecto usa tus colores, tu tipografía y tus componentes sin configurarlo manualmente. Si tu empresa tiene un design system en Figma o en código, Claude lo absorbe y lo aplica. Puedes mantener más de uno si tienes varias marcas.
+
+**Import desde cualquier sitio.** Empiezas desde un prompt, subes imágenes, documentos Word, presentaciones u hojas de cálculo. También hay una herramienta de captura web que extrae elementos directamente de tu web para que el prototipo se parezca al producto final. Esto es interesante: en vez de redibujar tu propia landing, la capturas y modificas desde ahí.
+
+**Handoff a Claude Code.** Cuando el diseño está listo, Claude genera un paquete de handoff que le pasas a Claude Code con una sola instrucción. Del prototipo al código sin copy-paste manual de medidas. Si Claude Code es tu agente de desarrollo, esto cierra el ciclo: diseño → implementación sin fricción.
+
+**Export a Canva, PDF, PPTX, HTML.** No te encierra. Si tu equipo trabaja en Canva, lo mandas ahí. Si necesitas una presentacion para mañana, lo sacas como PPTX. Si quieres un standalone, HTML.
+
+## Casos de uso reales
+
+Según los testers que ya lo han usado:
+
+- **Prototipos interactivos** para user testing sin esperar a un PR de código. Los diseñadores de Brilliant dicen que páginas que antes requerían 20+ prompts solo necesitaron 2 en Claude Design.
+- **Wireframes para PMs** que pasan directamente a Claude Code para implementación.
+- **Pitch decks** para fundadores que van de un esquema mental a una presentación on-brand en minutos.
+- **Exploración de diseño** para diseñadores senior que quieren probar muchas direcciones rápidas sin el coste de montar cada una.
+- **Prototipos con interactividad avanzada**: voz, video, shaders, 3D y AI integrada en el propio prototipo.
+
+## ¿A quién le pisa los dedos?
+
+La pregunta obvia: ¿esto mata Figma? No directamente. Pero sí compromete una parte del workflow.
+
+Lo que Claude Design ataca es la fase de **exploración rápida y prototipado inicial**. Esa fase donde un diseñador junior o un becario monta wireframes que luego un senior refina. Es el trabajo más mecánico, y es justo donde la IA brilla.
+
+Un diseñon senior con criterio, un sistema de diseño coherente a largo plazo, la supervisión de marca — eso sigue siendo humano. Pero la parte de "sácame 6 variaciones de esta landing para decidir cuál funciona" se acaba de hacer instantánea.
+
+El comentario más revelador en HN vino de alguien que trabajaba en startups de Figma + IA: *"Anthropic está comiéndose la capa de aplicación. Tienen distribución y sus ingenieros son excelentes."* Cuando el modelo es también la interfaz, el vendor del modelo tiene una ventaja brutal.
+
+Y sí, startups que estaban construyendo "Figma + AI" acaban de ver cómo Anthropic se les adelantaba de golpe. Mowgli.ai, que se define como "Figma for the agent era", aparece en los comentarios de la noticia en HN con tan solo 6 puntos. Mal momento para lanzar.
+
+## Lo que me preocupa
+
+**Todo se parece.** Un comentario en HN lo decía bien: solo es posible generar diseños "aceptables" porque la web se ha homogeneizado. Glass effect, drop shadows, Tailwind defaults, shadcn components. Si entrenas con eso, produces más de eso. Lo original, lo que rompe convenciones, sigue fuera del alcance.
+
+**Token burner.** Cada iteración consume tokens de Opus 4.7. Si estás en plan Pro con límites, tres iteraciones profundas y estás viendo la barra de.usage. Para equipos grandes, el coste puede escalar rápido.
+
+**Vendor lock-in sutil.** El handoff a Claude Code es genial... si usas Claude. Si tu equipo trabaja con Cursor, Aider o Copilot, ese handoff no te sirve de nada. Anthropic está construyendo un ecosistema cerrado elegante — conveniente pero propietario.
+
+## Mi veredicto
+
+Claude Design es **la herramienta que todo no-diseñador esperaba**. Fundadores, PMs, marketers — gente que tiene la idea pero no las skills — ahora pueden materializarla sin esperar a nadie. Eso solo ya lo hace valioso.
+
+Para diseñadores profesionales, es un acelerador de exploración, no un reemplazo. Pero sí es un reemplazo parcial del trabajo más mecánico y junior del proceso. Y eso tiene consecuencias reales en equipos.
+
+Lo que más me interesa es la **integración con Claude Code**. Si puedes ir de idea a prototipo a implementación dentro del mismo ecosistema, el ciclo de feedback se comprime de días a horas. Es el mismo patrón que vimos con Codex y computer use esta semana: Anthropic y OpenAI no quieren ser solo el modelo, quieren ser todo el stack.
+
+Y eso, para las startups que construyen sobre sus APIs, debería ser una señal de alarma.
