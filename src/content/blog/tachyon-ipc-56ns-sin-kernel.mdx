@@ -1,0 +1,168 @@
+---
+title: "Tachyon: IPC a 56 ns sin pasar por el kernel"
+date: 2026-04-19T14:30
+tags: ["ipc", "shared-memory", "rust", "performance"]
+excerpt: "Una librería open source logra 56.5 ns de latencia round-trip entre procesos en 7 lenguajes usando memfd y SPSC lock-free."
+---
+
+## El problema de hablar entre procesos
+
+Cuando dos procesos en la misma máquina necesitan comunicarse, las opciones tradicionales son lentas de verdad. Un Unix domain socket cuesta ~2 µs por round-trip. ZeroMQ por IPC local, ~10 µs. gRPC en localhost, ~1 ms. Para la mayoría de aplicaciones, eso no importa. Pero si estás construyendo un pipeline de inferencia ML donde C++ produce features y Python consume con PyTorch, o un feed de trading que necesita más de un millón de mensajes por segundo, cada microsegundo cuenta.
+
+[Tachyon](https://github.com/riyaneel/tachyon) es una librería open source (Apache 2.0) que propone una ruta distinta: zero-copy, sin kernel, sin broker, con 56.5 ns de latencia mediana por round-trip. Y funciona en 7 lenguajes: Python, Node.js, Java, Kotlin, Rust, Go y C++.
+
+## ¿Cómo funciona?
+
+La idea central es simple: compartir memoria entre procesos y coordinarse con atómicos, no con syscalls.
+
+### Control plane: conexión vía memfd
+
+Cuando un productor y un consumidor quieren hablar, el proceso es:
+
+1. El consumidor escucha en un Unix domain socket (`Bus.listen`).
+2. El productor se conecta (`Bus.connect`).
+3. El socket transfiere un file descriptor de `memfd` anónimo vía `SCM_RIGHTS`.
+4. El socket se cierra. Se acabó la participación del kernel.
+
+A partir de ahí, todo el I/O transcurre sobre la memoria compartida. No hay más syscalls en el camino caliente (hot path).
+
+### Data plane: anillo SPSC lock-free
+
+Tachyon usa un anillo Single-Producer Single-Consumer (SPSC). Los índices head/tail se sincronizan con `memory_order_acquire` / `memory_order_release` y se actualizan como máximo una vez cada 32 mensajes o con un `flush()` explícito. Eso reduce la presión sobre el bus de coherencia de caché.
+
+Cada estructura de control está alineada a 64 o 128 bytes para evitar false sharing. Es imposible que productor y consumer compitan por la misma cache line en el camino crítico.
+
+Veamos cómo se ve en Rust:
+
+```rust
+use tachyon_ipc::Bus;
+
+const SOCK: &str = "/tmp/chat.sock";
+const CAP: usize = 1 << 16; // 64 KiB de ring buffer
+
+fn main() {
+    // Consumidor: escucha primero
+    let bus = Bus::listen(SOCK, CAP).unwrap();
+    let guard = bus.acquire_rx(10_000).unwrap();
+    println!("recibidos {} bytes, type_id={}", guard.actual_size, guard.type_id);
+    guard.commit().unwrap();
+}
+```
+
+Y el productor en otra terminal:
+
+```rust
+use tachyon_ipc::Bus;
+
+fn main() {
+    let bus = Bus::connect("/tmp/chat.sock").unwrap();
+    bus.send(b"hola desde Rust", 1).unwrap();
+}
+```
+
+Sin serialización. Sin memcpy del payload. El consumidor lee directamente del anillo.
+
+### Zero-copy y DLPack
+
+La API zero-copy es más explícita. El productor reserva espacio en el anillo, escribe directamente, y confirma el tamaño real:
+
+```python
+import tachyon
+
+payload = b"datos_criticos"
+with tachyon.Bus.connect("/tmp/zb.sock") as bus:
+    with bus.send_zero_copy(size=len(payload), type_id=42) as tx:
+        with memoryview(tx) as mv:
+            mv[:] = payload
+        tx.actual_size = len(payload)
+```
+
+Y el lado PyTorch es donde brilla el soporte DLPack:
+
+```python
+import torch, tachyon
+
+with tachyon.Bus.listen("/tmp/dl.sock", 1 << 16) as bus:
+    with bus.drain_batch() as batch:
+        # Cero copias: PyTorch consume directamente desde la memoria compartida
+        tensor = torch.from_dlpack(batch[0]).view(torch.float32)
+        resultado = tensor.mean()  # opera in-place, sin alloc extra
+        del tensor  # libera antes de commit
+```
+
+Esto es significativo. En un pipeline típico donde C++ o Rust generan tensores y Python los consume con PyTorch, normalmente necesitas serializar → copiar al socket → recibir → deserializar → crear tensor. Con Tachyon, el tensor ya está en la memoria compartida. `torch.from_dlpack` devuelve un tensor que apunta a esa misma memoria. Cero copias en el camino de datos.
+
+## Arquitectura: por qué es tan rápido
+
+Los números de benchmark hablan solos (i7-12650H, DDR5-5600, Linux 6.19):
+
+| Percentil | Latencia |
+|-----------|----------|
+| p50       | 56.5 ns  |
+| p99       | 112.4 ns |
+| p99.9     | 122 ns   |
+
+Comparado con alternativas:
+
+| Transporte          | p50 RTT  | Cross-language | Zero-copy |
+|---------------------|----------|----------------|-----------|
+| **Tachyon**         | 56.5 ns  | 7 lenguajes    | Sí        |
+| iceoryx             | ~150 ns  | solo C++       | Sí        |
+| Aeron IPC           | ~250 ns  | mismo lenguaje | Sí        |
+| Unix domain socket  | ~2 µs    | Sí             | No        |
+| ZeroMQ (ipc://)     | ~10 µs   | Sí             | No        |
+
+Tres decisiones de diseño explican la velocidad:
+
+1. **Memfd + SCM_RIGHTS** para bootstrap. El kernel solo interviene al crear la conexión. Después, solo memoria compartida.
+
+2. **SPSC en lugar de MPMC**. Un anillo single-producer single-consumer elimina toda coordinación entre writers o readers. Si necesitas fan-out, instancias múltiples de SPSC independientes. MPSC nativo está planeado.
+
+3. **Estrategia híbrida de espera**. El consumidor hace spin (`cpu_relax`) por un umbral, y si no hay datos, duerme vía `SYS_futex` (Linux) o `__ulock_wait` (macOS) con un watchdog de 200 ms. Así no desperdicia CPU cuando no hay tráfico, pero reacciona rápido cuando lo hay.
+
+## Ejemplo real: feed de trading
+
+Un caso de uso clásico. Un proceso nativo mantiene un order book y tics de mercado a más de 1M msgs/seg. La estrategia de trading corre en Python:
+
+```python
+import tachyon, struct
+
+# type_id=1: MarketTick con price(float64) + volume(uint32) + ts(uint64)
+TICK_TYPE = 1
+
+with tachyon.Bus.listen("/tmp/market.sock", 1 << 20) as bus:
+    with bus.drain_batch() as batch:
+        for msg in batch:
+            if msg.type_id == TICK_TYPE:
+                data = msg.data
+                # Interpretar directamente, sin parsear
+                price = struct.unpack_from("<d", data, 0)[0]
+                volume = struct.unpack_from("<I", data, 8)[0]
+                ts = struct.unpack_from("<Q", data, 12)[0]
+                # Decisión de trading aquí
+```
+
+El productor en C++ envía con `send_zero_copy` + `type_id`, y la latencia total por mensaje está por debajo de 100 ns sin copias en el camino de datos.
+
+## Limitaciones
+
+Tachyon no es para todo. Es importante ser honesto:
+
+- **Solo misma máquina**. Sin soporte de red, por diseño. Si necesitas comunicación entre máquinas, esto no es tu herramienta.
+- **SPSC**. Un bus conecta exactamente un productor con un consumidor. Para MPMC, necesitas múltiples buses o esperar a la implementación nativa.
+- **Linux nativo, macOS tier-2, sin Windows**. Depende de `memfd` y `SCM_RIGHTS`, que son POSIX.
+- **v0.3.5**. Es joven. La API puede cambiar. La documentación está solidificándose.
+
+La comparación más justa es con `multiprocessing.SharedMemory` de Python, que solo te da un buffer crudo. Tachyon te da framing de mensajes, routing por `type_id`, recepción zero-copy y una ABI cross-language. Y lo hace en 56 ns.
+
+## Mi opinión
+
+Tachyon me parece uno de esos proyectos que resuelven un problema muy específico de forma elegante. El uso de `memfd` + `SCM_RIGHTS` para bootstrap y luego eliminar completamente al kernel del camino de datos es una decisión de diseño que muestra que sus autores entienden el stack de Linux a fondo.
+
+Lo que más me gusta es la apuesta por la simplicidad: un anillo SPSC, atómicos acquire/release, padding cache-line, y ya. No hay brokers, no hay daemons de fondo, no hay configuración de cluster. Dos procesos, un socket, un `memfd`, y a correr.
+
+La integración con DLPack es la cereza del pastel. En el mundo ML, donde Python es el consumidor final pero C++/Rust son los productores de datos de alto rendimiento, poder pasar tensores sin serialización es un salto cualitativo. Es el tipo de infraestructura que no es sexy pero acelera pipelines enteros.
+
+Mi precaución: sigue siendo v0.3.5. No lo pondría en producción mañana sin testear las esquinas ásperas — desconexiones abruptas, procesos que mueren dejando el anillo en estado inconsistente, comportamiento bajo memory pressure. Pero como concepto y como dirección de diseño, es brillante.
+
+Si alguna vez has peleado con gRPC en localhost por latency, o serializado Protobufs entre procesos que viven en la misma máquina, deberías echarle un vistazo.
