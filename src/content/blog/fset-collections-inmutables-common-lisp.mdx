@@ -1,0 +1,161 @@
+---
+title: "FSet: collections inmutables para Common Lisp"
+date: 2026-04-19T20:30
+tags: ["lisp", "functional", "collections", "immutable"]
+excerpt: "FSet trae collections funcionales e inmutables a Common Lisp con CHAMP trees, lookup polimórfico y ergonomía clojuriana."
+---
+
+Common Lisp siempre tuvo una relación rara con las estructuras de datos. Por un lado, el lenguaje ofrece listas, hash tables y arrays de serie. Por otro, sus hash tables son mutables, no tienen semántica de conjuntos, y comparar elementos requiere andar pasando `:test` a mano en cada operación. Si venías de Clojure, Haskell o Rust, echarás de menos mapas y sets inmutables con los que trabajar sin pensar en side effects.
+
+FSet existe para resolver exactamente eso. Es una biblioteca de collections funcionales para Common Lisp creada por Scott L. Burson, y hace poco publicó un libro — *Modern Common Lisp with FSet* — que la ha vuelto a poner en el foco en Hacker News (179 puntos, 24 comentarios). La idea es simple: **las operaciones de actualización devuelven una collection nueva**; la original sigue intacta. Igual que los mapas de Clojure, pero nativos en CL.
+
+## Qué ofrece FSet
+
+FSet proporciona cuatro tipos principales de collections, más variantes con árboles weight-balanced para recorridos ordenados:
+
+| Tipo | Constructor vacío | Literal | Descripción |
+|------|-------------------|---------|-------------|
+| **Set** | `(empty-set)` | `(set 1 2 3)` | Conjunto sin duplicados |
+| **Map** | `(empty-map)` | `(map ('a 1) ('b 2))` | Diccionario clave→valor |
+| **Seq** | `(empty-seq)` | `(seq 1 2 'a)` | Secuencia ordenada e indexada |
+| **Bag** | `(empty-bag)` | `(bag 1 2 1)` | Multiconjunto (con multiplicidad) |
+
+Desde la versión 2.0, maps y sets usan **CHAMP trees** (Compressed Hash Array Mapped Prefix trees), la misma estructura que Clojure popularizó. Esto garantiza O(log n) en operaciones con constantes excelentes.
+
+La versión actual es la **2.4.3**, disponible en Quicklisp para SBCL, CCL, ABCL, Allegro, LispWorks y ECL.
+
+## Instalación y primeros pasos
+
+```lisp
+;; cargar desde Quicklisp
+(ql:quickload "fset")
+
+;; importar el API principal
+(use-package :fset)
+```
+
+Con eso ya tienes acceso a todo el API. No hace falta andar importando símbolos uno a uno.
+
+## Lo que cambia respecto a las hash tables de CL
+
+Las hash tables estándar de Common Lisp tienen dos problemas gordos: son mutables, y necesitas especificar `:test` cada vez que las creas si quieres algo que no sea `eql`. FSet resuelve ambos:
+
+```lisp
+;; Hash table estándar — mutable, hay que especificar test
+(defparameter ht (make-hash-table :test #'equal))
+(setf (gethash 'x ht) 42)
+(gethash 'x ht) ;; → 42, T
+
+;; El mismo mapa en FSet — inmutable, compare automático
+(defparameter m (map ('x 42)))
+(@ m 'x)        ;; → 42
+(less m 'x)     ;; → mapa nuevo sin 'x
+m               ;; → #{| 'x 42 |} — ¡sigue intacto!
+```
+
+El operador `@` es el lookup polimórfico de FSet. Funciona en maps (devuelve valor), en seqs (devuelve elemento por índice), en sets (devuelve T o NIL), y en bags (devuelve multiplicidad). Y es `setf`-able: `(setf (@ m 'y) 10)` devuelve un mapa nuevo con la entrada añadida — sin tocar el original.
+
+## El protocolo `compare` y la anidación libre
+
+En CL estándar, meter un set como clave de un hash table requiere implementar `sxhash` y un test de igualdad a medida. En FSet, la función genérica `compare` se encarga de todo. Puedes anidar collections sin ningún esfuerzo:
+
+```lisp
+;; Un mapa cuya clave es un set
+(defparameter coords (set 3 4))
+(defparameter m (map (coords "origin")))
+(@ m coords)  ;; → "origin"
+
+;; Un set de mapas
+(defparameter s (set (map ('a 1)) (map ('b 2))))
+(size s)       ;; → 2
+(contains? s (map ('a 1)))  ;; → T
+```
+
+Esto es impensable con hash tables de serie sin escribir un montón de boilerplate.
+
+## Operaciones quasi-mutables: `includef` y amigos
+
+La programación funcional pura es elegante, pero a veces quieres la ergonomía de "modificar" una variable sin renunciar a la inmutabilidad. FSet ofrece operadores con sufijo `f` que hacen la actualización funcional + reasignación en un paso:
+
+```lisp
+(defparameter s (empty-set))
+
+;; Añadir un elemento (funcional + reasignación)
+(includef s 3)
+(includef s 7)
+s  ;; → ##{ 3 7 }
+
+;; Eliminar
+(excludef s 3)
+s  ;; → ##{ 7 }
+
+;; Union de sets
+(includef s (set 1 2))
+s  ;; → ##{ 1 2 7 }
+```
+
+Detrás de escena, cada operación crea una collection nueva y reasigna la variable. Es como tener `swap!` en Clojure pero sin el atom — más simple, menos ceremony.
+
+## GMap: comprehensions con tipado de resultado
+
+El macro `gmap` es probablemente la característica más potente de FSet. Permite mapear funciones sobre collections especificando el tipo de collection de salida:
+
+```lisp
+(defparameter numeros (seq 1 2 3 4 5))
+
+;; Cuadrados como set
+(gmap (:result set) (lambda (x) (* x x)) (:arg seq numeros))
+;; → ##{ 1 4 9 16 25 }
+
+;; Millar de aleatorios como seq
+(gmap (:result seq) (lambda (_) (random 100.0)) (:arg index 0 1000))
+
+;; Múltiples argumentos
+(gmap (:result map)
+      (lambda (k v) (values k (* v 10)))
+      (:arg map (map ('x 5) ('y 3))))
+;; → #{| 'x 50 'y 30 |}
+```
+
+El argumento `:arg` puede tomar un tipo de collection y una instance, o `index` para generar rangos. El `:result` controla qué tipo de collection se devuelve. Es más flexible que `mapcar` y más ergonomico que escribir loops a mano.
+
+## Álgebra de conjuntos, hecha bien
+
+FSet incluye un conjunto completo de operaciones algebraicas que funcionan entre maps, sets y bags:
+
+```lisp
+(defparameter a (set 1 2 3))
+(defparameter b (set 2 3 4))
+
+(union a b)              ;; → ##{ 1 2 3 4 }
+(intersection a b)       ;; → ##{ 2 3 }
+(difference a b)         ;; → ##{ 1 }
+(subset? a b)            ;; → NIL
+(subset? (set 2 3) b)   ;; → T
+```
+
+Para bags, además tienes `bag-sum` (suma multiplicidades) y `bag-product` (mínimo de multiplicidades). Los maps también soportan `union`, `intersection` y `difference`, con semánticas coherentes.
+
+## Variants weight-balanced para recorrido ordenado
+
+Si necesitas que la iteración siga un orden, FSet ofrece variants de cada tipo con árboles weight-balanced: `wb-set`, `wb-map`, `wb-seq`, `wb-bag`. El coste es ligeramente superior en operaciones individuales, pero ganas `first`, `last`, y recorrido ordenado garantizado.
+
+```lisp
+(defparameter ws (wb-set 3 1 4 1 5))
+(do-set (x ws) (print x))
+;; → 1 3 4 5 (ordenado)
+```
+
+## Mi opinión
+
+FSet es exactamente lo que Common Lisp necesitaba desde hace décadas. La falta de collections inmutables decentes era uno de los argumentos que siempre se usaba para rechazar CL en favor de Clojure, y este proyecto lo cierra de golpe. El API es limpio, `@` es brillante como operador polimórfico, y `gmap` ahorra una barbaridad de código repetitivo.
+
+Lo que me parece especialmente acertado es el enfoque pragmático: los operadores `includef`/`excludef` demuestran que inmutabilidad no tiene que significar fricción. Puedes escribir código que *parece* imperativo pero que por debajo es funcional. Es el punto dulce entre pureza académica y productividad real.
+
+El libro — *Modern Common Lisp with FSet* — es la mejor señal de que la biblioteca ha madurado. Una biblioteca sin documentación no existe; una con un libro entero dedicado a ella demuestra que hay comunidad e inversión real detrás.
+
+Si escribes Common Lisp y no has probado FSet, deberías. `(ql:quickload "fset")` y ya.
+
+---
+
+**Fuentes**: [GitHub — slburson/fset](https://github.com/slburson/fset), [Modern Common Lisp with FSet (libro)](https://fset.common-lisp.dev/Modern-CL/Top_html/index.html), [Hacker News](https://news.ycombinator.com/item?id=47779659)
