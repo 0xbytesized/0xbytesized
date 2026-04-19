@@ -5,7 +5,7 @@ tags: ["c", "seguridad", "memoria", "compiladores"]
 excerpt: "Fil-C compila tu código C/C++ tal cual y lo hace memory-safe con InvisiCaps y garbage collection. Sin reescribir en Rust, sin unsafe."
 ---
 
-Cada vez que sale un nuevo CVE de buffer overflow, someone sugiere "reescribirlo en Rust". Y cada vez, los maintainers de proyectos con millones de líneas en C responden algo como "eso no es viable". Fil-C propone una tercera vía: **compilar tu código C/C++ tal cual y obtener seguridad de memoria completa sin cambiar una línea**.
+Cada vez que sale un nuevo CVE de buffer overflow, alguien sugiere "reescribirlo en Rust". Y cada vez, los mantenedores de proyectos con millones de líneas en C responden algo como "eso no es viable". Fil-C propone una tercera vía: **compilar tu código C/C++ tal cual y obtener seguridad de memoria completa sin cambiar una línea**.
 
 Hace unos días, corsix publicó [un artículo brillante](https://www.corsix.org/content/simplified-model-of-fil-c) explicando el modelo simplificado de cómo funciona Fil-C por dentro. Y es fascinante.
 
@@ -13,7 +13,7 @@ Hace unos días, corsix publicó [un artículo brillante](https://www.corsix.org
 
 Los bugs de memoria en C/C++ — buffer overflows, use-after-free, double free, out-of-bounds — llevan décadas siendo la causa principal de vulnerabilidades explotables. Google estimó que el 70% de los bugs graves en Chrome eran de memoria. Microsoft dijo algo similar sobre Windows. La solución de la industria ha sido bifurcarse: o reescribes en un lenguaje seguro (Rust), o te conformas con sanitizers como ASan para detectar bugs en testing.
 
-Pero ASan no te protege en producción. Y reescribir projects gigantes en Rust es un proyecto de años. Fil-C se plantea una alternativa: **seguridad de memoria completa, en producción, sin reescribir nada**.
+Pero ASan no te protege en producción. Y reescribir proyectos gigantes en Rust es un proyecto de años. Fil-C se plantea una alternativa: **seguridad de memoria completa, en producción, sin reescribir nada**.
 
 ## InvisiCaps: capacidades invisibles
 
@@ -112,11 +112,11 @@ La palabra que usa Fil-C es "fanatically compatible". Y no es marketing. Lo que 
 - **GNU Emacs**, el editor con cuatro décadas de hacks en C
 - **Wayland**, el compositor de gráficos moderno para Linux
 
-No son programas pequeños o simples. Son codebases enormes con décadas de `setjmp`/`longjmp`, señales, threads, atomics, `mmap`, `shmget` y todo tipo de arte oscura de C. Y Fil-C los ejecuta de forma memory-safe.
+No son programas pequeños o simples. Son codebases enormes con décadas de `setjmp`/`longjmp`, señales, threads, atomics, `mmap`, `shmget` y todo tipo de arte oscuro de C. Y Fil-C los ejecuta de forma memory-safe.
 
 El compilador se basa en **clang 20.1.8** y soporta las extensiones de clang y la mayoría de las de GCC. Funciona con make, autotools, cmake, meson — los build systems que ya usas.
 
-## Comparado con alternatives
+## Comparado con alternativas
 
 Para ponerlo en perspectiva, las alternativas principales para seguridad de memoria en C/C++ son:
 
