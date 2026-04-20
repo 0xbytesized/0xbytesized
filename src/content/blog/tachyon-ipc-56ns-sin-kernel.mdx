@@ -30,7 +30,7 @@ A partir de ahí, todo el I/O transcurre sobre la memoria compartida. No hay má
 
 Tachyon usa un anillo Single-Producer Single-Consumer (SPSC). Los índices head/tail se sincronizan con `memory_order_acquire` / `memory_order_release` y se actualizan como máximo una vez cada 32 mensajes o con un `flush()` explícito. Eso reduce la presión sobre el bus de coherencia de caché.
 
-Cada estructura de control está alineada a 64 o 128 bytes para evitar false sharing. Es imposible que productor y consumer compitan por la misma cache line en el camino crítico.
+Cada estructura de control está alineada a 64 o 128 bytes para evitar false sharing. Es imposible que productor y consumidor compitan por la misma cache line en el camino crítico.
 
 Veamos cómo se ve en Rust:
 

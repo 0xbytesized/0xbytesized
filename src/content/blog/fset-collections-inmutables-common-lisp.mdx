@@ -20,9 +20,9 @@ FSet proporciona cuatro tipos principales de collections, más variantes con ár
 | **Seq** | `(empty-seq)` | `(seq 1 2 'a)` | Secuencia ordenada e indexada |
 | **Bag** | `(empty-bag)` | `(bag 1 2 1)` | Multiconjunto (con multiplicidad) |
 
-Desde la versión 2.0, maps y sets usan **CHAMP trees** (Compressed Hash Array Mapped Prefix trees), la misma estructura que Clojure popularizó. Esto garantiza O(log n) en operaciones con constantes excelentes.
+Desde la versión 2.0, maps y sets usan **CHAMP trees** (Compressed Hash-Array Mapped Prefix-tree), la misma estructura que Clojure popularizó. Esto garantiza O(log n) en operaciones con constantes excelentes.
 
-La versión actual es la **2.4.3**, disponible en Quicklisp para SBCL, CCL, ABCL, Allegro, LispWorks y ECL.
+La versión actual es la **2.4.3** (disponible en GitHub; Quicklisp aún distribuye la 2.2.0), compatible con SBCL, CCL, ABCL, Allegro, LispWorks y ECL.
 
 ## Instalación y primeros pasos
 
@@ -34,7 +34,7 @@ La versión actual es la **2.4.3**, disponible en Quicklisp para SBCL, CCL, ABCL
 (use-package :fset)
 ```
 
-Con eso ya tienes acceso a todo el API. No hace falta andar importando símbolos uno a uno.
+Con eso ya tienes acceso a toda la API. No hace falta andar importando símbolos uno a uno.
 
 ## Lo que cambia respecto a las hash tables de CL
 
@@ -94,7 +94,7 @@ s  ;; → ##{ 7 }
 s  ;; → ##{ 1 2 7 }
 ```
 
-Detrás de escena, cada operación crea una collection nueva y reasigna la variable. Es como tener `swap!` en Clojure pero sin el atom — más simple, menos ceremony.
+Detrás de escena, cada operación crea una collection nueva y reasigna la variable. Es como tener `swap!` en Clojure pero sin el atom — más simple, menos ceremonia.
 
 ## GMap: comprehensions con tipado de resultado
 
@@ -117,7 +117,7 @@ El macro `gmap` es probablemente la característica más potente de FSet. Permit
 ;; → #{| 'x 50 'y 30 |}
 ```
 
-El argumento `:arg` puede tomar un tipo de collection y una instance, o `index` para generar rangos. El `:result` controla qué tipo de collection se devuelve. Es más flexible que `mapcar` y más ergonomico que escribir loops a mano.
+El argumento `:arg` puede tomar un tipo de collection y una instance, o `index` para generar rangos. El `:result` controla qué tipo de collection se devuelve. Es más flexible que `mapcar` y más ergonómico que escribir bucles a mano.
 
 ## Álgebra de conjuntos, hecha bien
 
@@ -138,7 +138,7 @@ Para bags, además tienes `bag-sum` (suma multiplicidades) y `bag-product` (mín
 
 ## Variants weight-balanced para recorrido ordenado
 
-Si necesitas que la iteración siga un orden, FSet ofrece variants de cada tipo con árboles weight-balanced: `wb-set`, `wb-map`, `wb-seq`, `wb-bag`. El coste es ligeramente superior en operaciones individuales, pero ganas `first`, `last`, y recorrido ordenado garantizado.
+Si necesitas que la iteración siga un orden, FSet ofrece variantes de cada tipo con árboles weight-balanced: `wb-set`, `wb-map`, `wb-seq`, `wb-bag`. El coste es ligeramente superior en operaciones individuales, pero ganas `first`, `last`, y recorrido ordenado garantizado.
 
 ```lisp
 (defparameter ws (wb-set 3 1 4 1 5))

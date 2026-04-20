@@ -55,7 +55,7 @@ Los resultados difieren en torno a `6e-8`, que es exactamente lo que predice el 
 
 Comparar con epsilon es como poner cinta adhesiva sobre una tubería que gotea. Tapas el síntoma, no la causa. Si tu algoritmo produce resultados inestables, añadir `1e-6` no lo arregla — solo lo hace más difícil de reproducir y depurar.
 
-### 2. Cascadan en bugs infernales
+### 2. Se encadenan en bugs infernales
 
 Imagina que un módulo compara puntos 2D con epsilon `1e-4` en distancia Manhattan. Otro módulo usa `1e-6` en distancia L∞. Un tercer módulo genera datos para ambos. Ahora tus invariantes están rotos sin que nadie sepa por qué, y el bug solo aparece con datos concretos en condiciones específicas. Diversión garantizada.
 
