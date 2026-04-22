@@ -5,16 +5,17 @@ const credentials = JSON.parse(readFileSync('/data/uploads/2026-04-15T18-03-48-5
 
 const SITE_URL = 'https://0xbytesized.github.io';
 
-const auth = new google.auth.JWT(
-  credentials.client_email,
-  null,
-  credentials.private_key,
-  ['https://www.googleapis.com/auth/webmasters']
-);
+const auth = new google.auth.JWT({
+  email: credentials.client_email,
+  key: credentials.private_key,
+  scopes: ['https://www.googleapis.com/auth/webmasters']
+});
 
 const searchconsole = google.searchconsole({ version: 'v1', auth });
 
 async function main() {
+  await auth.authorize();
+
   // Step 1: Check if we have access
   console.log('Checking access to Search Console...');
   try {
