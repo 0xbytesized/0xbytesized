@@ -1,0 +1,138 @@
+---
+title: "Theseus: emulador estático que transpila x86 a Rust"
+date: 2026-04-22T06:30
+tags: ["rust", "emuladores", "windows", "compiladores", "retrocomputing"]
+excerpt: "Theseus convierte binarios PE de Windows en código Rust nativo. Sin JIT ni intérpretes: emulación por traducción estática con depuradores reales."
+---
+
+Evan Martin, el ingeniero detrás de retrowin32, acaba de publicar **Theseus**: un emulador de Windows/x86 que no interpreta ni compila en caliente, sino que **traduce estáticamente** un `.exe` de 32 bits a código Rust. El resultado es un binario nativo que se puede depurar con `lldb`, perfilar con herramientas estándar y ejecutar en cualquier plataforma que compile Rust.
+
+La idea suena a ciencia ficción retro, pero el repositorio ya tiene código funcional. Desde que Martin lo concibió hasta tener DirectX, FPU y MMX corriendo en su programa de prueba pasaron apenas un par de semanas. Veamos cómo funciona.
+
+## El problema con los emuladores tradicionales
+
+Un emulador clásico es un bucle que decodifica una instrucción x86, modifica registros y memoria, y repite. Si le añades un JIT, el bucle se vuelve más rápido, pero introduces una barrera entre el código emulado y el nativo. Depurar un JIT es doloroso: los stack traces muestran código ensamblador generado dinámicamente, los breakpoints del sistema no funcionan y el profiling requiere herramientas específicas.
+
+Además, la interfaz entre el emulador y el sistema operativo anfitrión es ancha. Cada llamada a una API de Windows debe cruzar esa frontera, con marshalling de punteros, conversiones de convenciones de llamada y sincronización de estado.
+
+Theseus ataca ambos problemas de raíz: **elimina el intérprete y el JIT**, moviendo todo el trabajo al tiempo de compilación.
+
+## De PE a Rust: el pipeline
+
+Theseus tiene dos mitades. La primera es `tc` («theseus compiler»): un programa Rust que carga un ejecutable PE, lo desensambla con `iced_x86` y genera código Rust equivalente. La segunda mitad es una implementación de las APIs de Win32 en Rust puro, más un runtime que emula los registros x86, la FPU, MMX y el bus de flags.
+
+El flujo es:
+
+1. **Carga PE**: se parsean las secciones, tablas de importación y recursos.
+2. **Análisis**: se descubren bloques de código identificando saltos y llamadas.
+3. **Traducción**: cada instrucción x86 se convierte en una expresión Rust que opera sobre `ctx.cpu.regs` y `ctx.memory`.
+4. **Compilación**: el código generado se compila junto al runtime y a la implementación de Win32, produciendo un binario nativo.
+
+Veamos cómo se ve el modelo de memoria. En el runtime, `Memory` es un array de bytes plano sin paginación, compartido de forma insegua entre hilos porque el ejecutable objetivo ya controla todo el acceso:
+
+```rust
+use zerocopy::{FromBytes, IntoBytes};
+
+pub struct Memory {
+    bytes: &'static mut [u8],
+}
+
+impl Memory {
+    pub fn read<T: FromBytes>(&self, addr: u32) -> T {
+        T::read_from_prefix(&self.bytes[addr as usize..])
+            .unwrap().0
+    }
+
+    pub fn write<T: IntoBytes + zerocopy::Immutable>(
+        &mut self, addr: u32, val: T
+    ) {
+        val.write_to_prefix(&mut self.bytes[addr as usize..])
+            .unwrap();
+    }
+}
+```
+
+Observa el uso de `zerocopy` para leer y escribir tipos tipados sin `unsafe` adicional. Es una decisión elegante: convierte lecturas como `mov eax, [ebx]` en `ctx.memory.read::<u32>(addr)` con coste cero en la mayoría de arquitecturas.
+
+## Registros x86 en Rust
+
+El runtime modela los registros de 32 bits como un struct plano. Los subregistros (`AX`, `AL`, `AH`) se implementan con getters y setters que enmascaran bits, sin magia de punteros:
+
+```rust
+#[repr(C)]
+#[derive(Debug, Default)]
+pub struct Regs {
+    pub eax: u32, pub ecx: u32,
+    pub edx: u32, pub ebx: u32,
+    pub esi: u32, pub edi: u32,
+    pub esp: u32, pub ebp: u32,
+}
+
+impl Regs {
+    pub fn get_ax(&self) -> u16 {
+        self.eax as u16
+    }
+    pub fn set_ax(&mut self, val: u16) {
+        self.eax = (self.eax & 0xFFFF_0000) | (val as u32);
+    }
+    pub fn get_al(&self) -> u8 {
+        self.eax as u8
+    }
+    pub fn set_al(&mut self, val: u8) {
+        self.eax = (self.eax & 0xFFFF_FF00) | (val as u32);
+    }
+}
+```
+
+Así, cuando el generador encuentra `mov ax, 5`, emite:
+
+```rust
+ctx.cpu.regs.set_ax(0x5u16);
+```
+
+Esto permite que el compilador de Rust aplique optimizaciones constantes, inline y vectorización automática sobre código que originalmente era ensamblador a mano de 1998.
+
+## Evaluación parcial en la práctica
+
+El truco más interesante de Theseus es que **resuelve en tiempo de compilación** lo que otros emuladores hacen en runtime. El linker, el cargador PE y el resolvedor de imports se ejecutan durante la traducción, no al arrancar el programa.
+
+En su artículo, Martin muestra cómo una llamada a `CreateWindowExA` se resuelve estáticamente. El compilador ve la entrada en la tabla IAT, busca la dirección de la implementación Rust y genera algo así:
+
+```rust
+// 004012a0 push 4070A4h
+push(ctx, 0x4070a4u32);
+// 004012a5 push 8
+push(ctx, 0x8u32);
+// 004012a7 call dword ptr ds:[4060E8h]
+call(ctx, 0x4012ad, Cont(user32::CreateWindowExA_stdcall));
+```
+
+La dirección `0x4060E8h` que en el ejecutable original apuntaba a una entrada importada, ahora es una llamada directa a la función Rust `user32::CreateWindowExA_stdcall`. No hay indirección en runtime, no hay tabla de trampolines, no hay bridging costoso entre mundos.
+
+Este es un caso claro de **evaluación parcial**: el compilador de Theseus ejecuta parcialmente el cargador del sistema para producir una instantánea del estado listo para correr.
+
+## Las ventajas de no emular
+
+La traducción estática cambia completamente la experiencia de desarrollo:
+
+- **Depurador nativo**: porque el output es Rust, puedes usar `gdb` o `lldb` directamente. Los breakpoints se colocan en el código generado, los stack traces cruzan transparentemente entre código traducido e implementaciones de Win32.
+- **Profiler nativo**: `perf` o Instruments ven funciones con nombre en lugar de direcciones en un JIT.
+- **SDL nativo**: en macOS no necesitas una SDL compilada para x86-64 ni Rosetta. El binario de salida es código nativo que llama a SDL nativo.
+- **Menor superficie de bridging**: en retrowin32, gran parte del código servía para cruzar la frontera emulador-sistema. En Theseus esa frontera es mínima.
+
+Por supuesto, hay límites técnicos. El código que se genera a sí mismo en runtime (autogeneración de JITs dentro del ejecutable) no puede traducirse estáticamente. Y no hay garantía teórica de encontrar todo el código ejecutable en presencia de `jump tables` o vtables polimórficos. Martin lo sabe: su post lo menciona explícitamente. Pero para videojuegos antiguos o programas específicos, donde el autor está dispuesto a aportar pistas manuales, eso no es un obstáculo.
+
+## Mi veredicto
+
+Theseus me parece más valioso como **demostración de principio** que como producto acabado. No es que vaya a reemplazar a Wine o a DOSBox mañana; de hecho, advierte en el README que «probablemente no funcionará con el programa que pruebes». Pero el experimento demuestra que gran parte de lo que hacen los emuladores dinámicos es trabajo repetido en cada ejecución que podría hacerse una sola vez en build time.
+
+Como desarrollador, me fascina la idea de que un ejecutable heredado deje de ser una caja negra que requiere un intérprete, y pase a ser fuente compilable que acepta refactorización. El «Ship of Theseus» del nombre no es casualidad: si reemplazas pieza por pieza un programa x86 por Rust, ¿en qué momento deja de ser emulación y empieza a ser un port? Theseus se sitúa justo en esa frontera filosófica.
+
+También es un recordatorio oportuno de que la inteligencia artificial puede acelerar la construcción de clones funcionales — como el retrotick que inspiró este proyecto — pero no sustituye el juicio de un ingeniero senior sobre **qué** construir. Martin no ha escrito otro emulador genérico; ha planteado la pregunta correcta y encontrado una respuesta elegante.
+
+Técnicamente, me gustaría ver cómo se comporta la traducción estática con código más moderno: protección de stack (`/GS`), ASLR, llamadas COM o marshalling de COM+. Pero incluso si nunca llega ahí, Theseus ya ha validado que la aproximación es viable para Win32, DirectX y juegos de finales de los noventa. Y eso es más de lo que muchos emuladores clásicos han logrado en años.
+
+## Recursos
+
+- [Repositorio de Theseus](https://github.com/evmar/theseus) — código fuente en Rust.
+- [Artículo original de Evan Martin](https://neugierig.org/software/blog/2026/04/theseus.html) — motivación, evaluación parcial y analogía con WebAssembly.
