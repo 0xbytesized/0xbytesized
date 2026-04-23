@@ -7,17 +7,17 @@ excerpt: "Vídeo que se edita en el navegador: VidStudio usa WebCodecs, FFmpeg W
 
 Hoy me topé con un *Show HN* que me hizo detener el scroll: [VidStudio](https://vidstudio.app/video-editor), un editor de video que promete algo que suena imposible hasta que lees la pila tecnológica: editar, recortar, exportar y persistir proyectos de video **sin que un solo byte salga de tu máquina**. Nada de cuentas, nada de nubes, nada de *"acepta estos términos"*. Solo tu navegador, tu video y una combinación de APIs modernas que, vistas en conjunto, dibujan una arquitectura elegante.
 
-La publicación acumuló cerca de 280 puntos en Hacker News y generó una discusión técnica interesante. Algunos usuarios señalaron problemas de compatibilidad con códecs HEVC en Firefox; otros preguntaron por los límites de memoria en móviles cuando se procesan archivos 4K. El creador respondió con detalle, pero lo que más me llamó la atención fue la descripción del stack: WebCodecs para decodificación acelerada por hardware, FFmpeg compilado a WebAssembly para codificación final, Pixi.js sobre WebGL para la interfaz, Web Workers para no bloquear el hilo principal, e IndexedDB para guardar proyectos localmente. Es una arquitectura de procesamiento de video 100 % cliente que, hasta hace pocos años, habría requerido una aplicación nativa.
+La publicación acumuló cerca de 280 puntos en Hacker News y generó una discusión técnica interesante. Algunos usuarios señalaron problemas de compatibilidad con códecs HEVC en Firefox; otros preguntaron por los límites de memoria en móviles cuando se procesan archivos 4K. El creador respondió con detalle, pero lo que más me llamó la atención fue la descripción del stack: WebCodecs para decodificación acelerada por hardware, FFmpeg compilado a WebAssembly para codificación final, Pixi.js sobre WebGL para la interfaz, Web Workers para no bloquear el hilo principal e IndexedDB para guardar proyectos localmente. Es una arquitectura de procesamiento de video 100 % cliente que, hasta hace pocos años, habría requerido una aplicación nativa.
 
 ## Por qué importa el procesamiento local
 
-La mayoría de editores de video en línea suben tu material a servidores remotos. Eso introduce latencia, costes de infraestructura y, sobre todo, una barrera de privacidad. VidStudio demuestra que el navegador ya tiene suficientes piezas para montar un pipeline decente sin salir del dispositivo.
+La mayoría de editores de video en línea suben tu material a servidores remotos. Eso introduce latencia, costes de infraestructura y, sobre todo, una barrera de privacidad. VidStudio demuestra que el navegador ya tiene suficientes piezas para montar una cadena de procesamiento decente sin salir del dispositivo.
 
 La clave está en combinar dos mundos: la velocidad de las APIs nativas del navegador (WebCodecs) con la versatilidad de herramientas maduras portadas a WASM (FFmpeg). Uno maneja la lectura rápida; el otro, la escritura flexible. Entre medias, Web Workers evitan que la interfaz se congele, e IndexedDB actúa como sistema de archivos persistente.
 
 ## Decodificación con WebCodecs
 
-La API de WebCodecs permite decodificar video directamente en el navegador usando el acelerador de hardware cuando está disponible. Esto hace que el *scrubbing* (mover la cabeza lectora por la línea de tiempo) sea fluido, porque no dependes de un servidor que genere previsualizaciones.
+La API de WebCodecs permite decodificar video directamente en el navegador usando el acelerador de hardware cuando está disponible. Esto hace que mover la cabeza lectora por la línea de tiempo sea fluido, porque no dependes de un servidor que genere previsualizaciones.
 
 El siguiente ejemplo muestra cómo configurar un decodificador y extraer fotogramas de un vídeo MP4. En un caso real, los datos vendrían de un `FileReader` tras arrastrar un archivo; aquí uso un array de bytes como ilustración:
 
@@ -90,11 +90,11 @@ const exportBlob = new Blob([output.buffer], { type: "video/mp4" });
 URL.createObjectURL(exportBlob);
 ```
 
-El punto crítico aquí es la memoria. FFmpeg.wasm ejecuta dentro del heap de WebAssembly, que en móviles puede estar limitado a pocos cientos de megabytes. VidStudio aparentemente mitiga esto fragmentando el trabajo y usando Workers, aunque el creador admite que videos muy largos en 4K pueden chocar con el techo del navegador. Es un tradeoff honesto: privacidad total a cambio de restricciones hardware.
+El punto crítico aquí es la memoria. FFmpeg.wasm ejecuta dentro del heap de WebAssembly, que en móviles puede estar limitado a pocos cientos de megabytes. VidStudio aparentemente mitiga esto fragmentando el trabajo y usando Workers, aunque el creador admite que videos muy largos en 4K pueden chocar con el techo del navegador. Es un compromiso honesto: privacidad total a cambio de restricciones hardware.
 
 ## Aislamiento en Web Workers
 
-Procesar video en el hilo principal es una receta para el *jank*. Cualquier operación pesada —decodificar una secuencia, ejecutar FFmpeg, renderizar previsualizaciones— debe moverse a un Worker:
+Procesar video en el hilo principal es una receta para el bloqueo. Cualquier operación pesada —decodificar una secuencia, ejecutar FFmpeg, renderizar previsualizaciones— debe moverse a un Worker:
 
 ```typescript
 // video-worker.ts

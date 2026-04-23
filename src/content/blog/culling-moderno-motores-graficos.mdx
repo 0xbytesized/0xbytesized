@@ -7,13 +7,13 @@ excerpt: "El culling sigue siendo la optimización más importante en motores gr
 
 Nikita Krupitskas acaba de publicar un artículo titulado *Modern rendering culling techniques* con una frase que me ha calado: "el mejor trabajo es el que nunca se ejecuta". Tras trabajar en títulos como *Saints Row: The Third Remastered*, sabe de lo que habla. El culling —descartar geometría antes de que llegue a la GPU— sigue siendo, décadas después, la optimización más rentable en renderizado en tiempo real.
 
-No es un tema nuevo, pero sí un tema que evoluciona constantemente. Mientras la industria se obsesiona con DLSS, path tracing en tiempo real y generación neural de frames, los motores gráficos siguen dedicando una parte enorme de su código a una pregunta simple: **¿esto realmente necesita dibujarse?**
+No es un tema nuevo, pero sí un tema que evoluciona constantemente. Mientras la industria se obsesiona con DLSS, trazado de caminos en tiempo real y generación neural de fotogramas, los motores gráficos siguen dedicando una parte enorme de su código a una pregunta simple: **¿esto realmente necesita dibujarse?**
 
 ## Los tres pilares básicos
 
 Antes de hablar de GPU-driven rendering o meshlets, conviene repasar las tres técnicas más baratas y universales.
 
-**Culling por distancia**: si un objeto está más allá de un umbral configurable, se descarta. Es trivial, casi gratis en CPU, y funciona bien para props pequeños que desaparecen en el horizonte. El problema siempre es el mismo: evitar el *popping* visual. Las soluciones típicas pasan por fundidos con dithering, LODs agresivos o impostores (billboards que reemplazan la geometría real a distancia).
+**Culling por distancia**: si un objeto está más allá de un umbral configurable, se descarta. Es trivial, casi gratis en CPU, y funciona bien para props pequeños que desaparecen en el horizonte. El problema siempre es el mismo: evitar la aparición brusca. Las soluciones típicas pasan por fundidos con tramado, LODs agresivos o impostores (carteles orientados a cámara que reemplazan la geometría real a distancia).
 
 **Backface culling**: cada triángulo tiene una cara visible y otra oculta. Para mallas cerradas, la GPU puede descartar automáticamente la mitad de los triángulos basándose en el orden de vértices. Es una ganancia enorme por prácticamente cero coste, aunque hay que tener cuidado con materiales de doble cara y transparencias.
 
@@ -58,7 +58,7 @@ Frustum culling es eficiente, pero ciego a lo que hay *delante* de la cámara. S
 
 La forma más común en motores modernos es el **Hi-Z buffer** (también llamado Hierarchical Z-Buffer). La idea es generar una versión reducida del buffer de profundidad de la frame anterior, construir una pirámide de mipmaps donde cada nivel representa el valor Z máximo de una región más grande, y usar esa pirámide para rechazar geometría en CPU o en compute antes de emitir draw calls.
 
-El beneficio es claro: reduces drásticamente el coste de escenas densas como ciudades o interiores. El coste? Una frame de latencia en la profundidad, que obliga a detectar cambios bruscos de cámara y fallar a un depth prepass completo cuando sea necesario.
+El beneficio es claro: reduces drásticamente el coste de escenas densas como ciudades o interiores. El coste? Un fotograma de latencia en la profundidad, que obliga a detectar cambios bruscos de cámara y recurrir a un pase previo de profundidad completo cuando sea necesario.
 
 A continuación, una versión simplificada en Python de cómo una cuadrícula espacial reduce el espacio de búsqueda para occlusion culling:
 
@@ -98,7 +98,7 @@ Obviamente esto es una caricatura respecto a lo que hace un motor comercial, per
 
 Hasta aquí, el CPU decide qué dibujar y emite un draw call por objeto visible. Ese modelo tiene un límite: cuando la escena tiene decenas de miles de objetos, el tiempo de culling en CPU y la cantidad de draw calls se vuelven problemáticos.
 
-La tendencia moderna es empujar la lógica de culling al GPU mediante **indirect drawing**. En lugar de que la CPU itere objecto por objecto, lanza un compute shader que evalúa visibilidad para cada meshlet (grupos de ~64-256 triángulos), escribe los índices de los supervivientes en un buffer GPU, y luego emite uno o pocos draw calls indirectos que consumen ese buffer.
+La tendencia moderna es empujar la lógica de culling al GPU mediante **indirect drawing**. En lugar de que la CPU itere objeto por objeto, lanza un compute shader que evalúa visibilidad para cada meshlet (grupos de ~64-256 triángulos), escribe los índices de los supervivientes en un buffer GPU y luego emite uno o pocos draw calls indirectos que consumen ese buffer.
 
 Esto desbloquea una jerarquía de culling: objeto -> meshlet -> triángulo. Cada nivel elimina lo que el siguiente no debería procesar. En la práctica, el amplification shader (o task shader) evalúa frustum y Hi-Z a nivel de meshlet, y el mesh shader puede incluso descartar triángulos sub-pixel antes de que lleguen al rasterizador.
 

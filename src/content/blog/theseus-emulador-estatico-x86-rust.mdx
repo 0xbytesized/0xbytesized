@@ -11,7 +11,7 @@ La idea suena a ciencia ficción retro, pero el repositorio ya tiene código fun
 
 ## El problema con los emuladores tradicionales
 
-Un emulador clásico es un bucle que decodifica una instrucción x86, modifica registros y memoria, y repite. Si le añades un JIT, el bucle se vuelve más rápido, pero introduces una barrera entre el código emulado y el nativo. Depurar un JIT es doloroso: los stack traces muestran código ensamblador generado dinámicamente, los breakpoints del sistema no funcionan y el profiling requiere herramientas específicas.
+Un emulador clásico es un bucle que decodifica una instrucción x86, modifica registros y memoria, y repite. Si le añades un JIT, el bucle se vuelve más rápido, pero introduces una barrera entre el código emulado y el nativo. Depurar un JIT es doloroso: las trazas de pila muestran código ensamblador generado dinámicamente, los puntos de interrupción del sistema no funcionan y el perfilado requiere herramientas específicas.
 
 Además, la interfaz entre el emulador y el sistema operativo anfitrión es ancha. Cada llamada a una API de Windows debe cruzar esa frontera, con marshalling de punteros, conversiones de convenciones de llamada y sincronización de estado.
 
@@ -28,7 +28,7 @@ El flujo es:
 3. **Traducción**: cada instrucción x86 se convierte en una expresión Rust que opera sobre `ctx.cpu.regs` y `ctx.memory`.
 4. **Compilación**: el código generado se compila junto al runtime y a la implementación de Win32, produciendo un binario nativo.
 
-Veamos cómo se ve el modelo de memoria. En el runtime, `Memory` es un array de bytes plano sin paginación, compartido de forma insegua entre hilos porque el ejecutable objetivo ya controla todo el acceso:
+Veamos cómo se ve el modelo de memoria. En el runtime, `Memory` es un array de bytes plano sin paginación, compartido de forma insegura entre hilos porque el ejecutable objetivo ya controla todo el acceso:
 
 ```rust
 use zerocopy::{FromBytes, IntoBytes};
@@ -124,9 +124,9 @@ Por supuesto, hay límites técnicos. El código que se genera a sí mismo en ru
 
 ## Mi veredicto
 
-Theseus me parece más valioso como **demostración de principio** que como producto acabado. No es que vaya a reemplazar a Wine o a DOSBox mañana; de hecho, advierte en el README que «probablemente no funcionará con el programa que pruebes». Pero el experimento demuestra que gran parte de lo que hacen los emuladores dinámicos es trabajo repetido en cada ejecución que podría hacerse una sola vez en build time.
+Theseus me parece más valioso como **demostración de principio** que como producto acabado. No es que vaya a reemplazar a Wine o a DOSBox mañana; de hecho, advierte en el README que «probablemente no funcionará con el programa que pruebes». Pero el experimento demuestra que gran parte de lo que hacen los emuladores dinámicos es trabajo repetido en cada ejecución que podría hacerse una sola vez en tiempo de compilación.
 
-Como desarrollador, me fascina la idea de que un ejecutable heredado deje de ser una caja negra que requiere un intérprete, y pase a ser fuente compilable que acepta refactorización. El «Ship of Theseus» del nombre no es casualidad: si reemplazas pieza por pieza un programa x86 por Rust, ¿en qué momento deja de ser emulación y empieza a ser un port? Theseus se sitúa justo en esa frontera filosófica.
+Como desarrollador, me fascina la idea de que un ejecutable heredado deje de ser una caja negra que requiere un intérprete y pase a ser fuente compilable que acepta refactorización. El «barco de Teseo» del nombre no es casualidad: si reemplazas pieza por pieza un programa x86 por Rust, ¿en qué momento deja de ser emulación y empieza a ser un port? Theseus se sitúa justo en esa frontera filosófica.
 
 También es un recordatorio oportuno de que la inteligencia artificial puede acelerar la construcción de clones funcionales — como el retrotick que inspiró este proyecto — pero no sustituye el juicio de un ingeniero senior sobre **qué** construir. Martin no ha escrito otro emulador genérico; ha planteado la pregunta correcta y encontrado una respuesta elegante.
 

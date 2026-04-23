@@ -34,7 +34,7 @@ En su lugar, el stub maneja su propio *event loop* manualmente:
 - En macOS: usa `kqueue` con stdin, un Mach port de IOKit y las notificaciones de dispositivos.
 - En Windows: usa I/O completion ports con `GetQueuedCompletionStatusEx`.
 
-Todos los transfers USB se modeled como struct que poseen sus propios búferes de memoria. Cuando un transfer está en vuelo, la propiedad conceptual del búfer pasa alkernel del SO. Si algo sale mal durante el teardown de un dispositivo, el código elige **leakear memoria** antes que recuperar un puntero colgante — una decisión explícita documentada y vinculada a [faultlore.com/blah/everyone-poops](https://faultlore.com/blah/everyone-poops/).
+Todos los transfers USB se modelan como struct que poseen sus propios búferes de memoria. Cuando un transfer está en vuelo, la propiedad conceptual del búfer pasa al kernel del SO. Si algo sale mal durante el desmontaje de un dispositivo, el código elige **perder memoria** antes que recuperar un puntero colgante — una decisión explícita documentada y vinculada a [faultlore.com/blah/everyone-poops](https://faultlore.com/blah/everyone-poops/).
 
 ## Código: conectándote a un dispositivo Arduino
 
@@ -175,8 +175,8 @@ La extensión no es perfecta. Tiene restricciones importantes:
 
 awawausb es exactamente el tipo de proyecto que me parece inspirador: en lugar de esperar a que Mozilla implemente WebUSB (llevan 15 años sin hacerlo), alguien se ha sentado, ha estudiado las APIs de los tres sistemas operativos, ha escrito miles de líneas de Rust y JavaScript, y ha publicado una solución que funciona **hoy**.
 
-La decisión de evitar async en el stub es valiente y bien argumentada. Cuando los runtimes async de Rust no encajan con las APIs del sistema, hacer tu propio event loop con `epoll`/`kqueue` directamente no es solo viable — es probablemente más correcto. Y la filosofía de "prefiero leakear memoria antes que usar un puntero colgante" es pragmatismo de ingeniería en su mejor expresión.
+La decisión de evitar async en el stub es valiente y bien argumentada. Cuando los runtimes async de Rust no encajan con las APIs del sistema, hacer tu propio event loop con `epoll`/`kqueue` directamente no es solo viable — es probablemente más correcto. Y la filosofía de "prefiero perder memoria antes que usar un puntero colgante" es pragmatismo de ingeniería en su mejor expresión.
 
-¿Es un sustituto perfecto de una implementación nativa? No. Requiere un paso de instalación extra, no funciona en Android y tiene edges cases de sincronización de estado. Pero para desarrolladores de hardware que necesitan WebUSB en Firefox para probar sus dispositivos, o para hackers que quieren iterar rápido sin cambiar de navegador, esta extensión es un regalo.
+¿Es un sustituto perfecto de una implementación nativa? No. Requiere un paso de instalación extra, no funciona en Android y tiene casos límite de sincronización de estado. Pero para desarrolladores de hardware que necesitan WebUSB en Firefox para probar sus dispositivos, o para hackers que quieren iterar rápido sin cambiar de navegador, esta extensión es un regalo.
 
 Si trabajas con microcontroladores, placas de desarrollo o cualquier hardware que exponga WebUSB, te recomiendo probarla. Y si encuentras diferencias de comportamiento con la implementación de Chrome, el autor pide explícitamente que se reporten — su objetivo es compatibilidad total.

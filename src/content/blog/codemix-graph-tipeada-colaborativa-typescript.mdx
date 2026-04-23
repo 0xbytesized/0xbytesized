@@ -2,12 +2,12 @@
 title: "@codemix/graph: grafos tipados y colaborativos en TypeScript"
 date: 2026-04-21T20:00
 tags: ["typescript", "grafos", "crdt", "bases-de-datos", "colaboracion"]
-excerpt: "@codemix/graph trae a TypeScript una base de datos de grafos en memoria, tipada con Zod, consultable con Cypher o Gremlin, y sincronizable vía CRDT con Yjs."
+excerpt: "@codemix/graph trae a TypeScript una base de datos de grafos en memoria, tipada con Zod, consultable con Cypher o Gremlin y sincronizable vía CRDT con Yjs."
 ---
 
 ## Cuando Neo4j se queda grande
 
-Las bases de datos de grafos siempre me han parecido elegantísimas. Modelas el mundo como nodos y aristas, haces traversals y de repente preguntas como "¿quién de mis amigos ha trabajado con alguien de este equipo?" se resuelven de forma natural. El problema es que montar Neo4j para un side project es como alquilar una grúa para cambiar una bombilla.
+Las bases de datos de grafos siempre me han parecido elegantísimas. Modelas el mundo como nodos y aristas, haces traversals y de repente preguntas como "¿quién de mis amigos ha trabajado con alguien de este equipo?" se resuelven de forma natural. El problema es que montar Neo4j para un proyecto personal es como alquilar una grúa para cambiar una bombilla.
 
 Por eso me llamó la atención [@codemix/graph](https://github.com/codemix/graph) cuando apareció en Hacker News esta semana. Es una base de datos de grafos **en memoria, puramente TypeScript**, tipada de punta a cabo con Zod (o Valibot, o ArkType — soporta Standard Schema), que puedes consultar con un subconjunto de Cypher **o** con una API de traversal estilo Gremlin. Y lo más interesante: tiene un adaptador de almacenamiento basado en [Yjs](https://yjs.dev/) que convierte el grafo en un CRDT colaborativo y offline-first.
 
@@ -86,7 +86,7 @@ const results = graph.query(
 
 ### Traversals estilo Gremlin
 
-Si prefieres un encadenamiento fluido tipo_stream, `GraphTraversal` te da una API tipada — labels y propiedades se infieren en cada paso:
+Si prefieres un encadenamiento fluido de tipo stream, `GraphTraversal` te da una API tipada — labels y propiedades se infieren en cada paso:
 
 ```typescript
 import { GraphTraversal } from "@codemix/graph";
@@ -138,7 +138,7 @@ const schema = {
 } as const satisfies GraphSchema;
 ```
 
-- **Hash** — O(1) para igualdad exacta, ideal para IDs y lookups únicos.
+- **Hash** — O(1) para igualdad exacta, ideal para IDs y búsquedas directas.
 - **B-tree** — O(log n) para rangos, comparaciones y ordenación.
 - **Fulltext** — BM25 para `CONTAINS` y búsqueda libre, con stemming en inglés.
 
@@ -187,13 +187,13 @@ asyncGraph.on("operation", (op) => {
 asyncGraph.applyOperation(remoteOp);
 ```
 
-Esto convierte el grafo en algo que puedes replicar, enviar y aplicar de forma distribuida. Me recuerda a los event-sourcing patterns, pero con la ergonomía de un grafo tipado.
+Esto convierte el grafo en algo que puedes replicar, enviar y aplicar de forma distribuida. Me recuerda a los patrones de event sourcing, pero con la ergonomía de un grafo tipado.
 
 ## Mi veredicto
 
-@codemix/graph cubre un hueco que nadie estaba llenando: una base de datos de grafos que puedes meter en tu app de TypeScript, tipar con Zod, consultar con Cypher, recorrer con Gremlin, indexar correctamente, y encima compartir en tiempo real entre pares sin nada de infraestructura. Es ambicioso para un proyecto que acaba de nacer (se publicó en npm el 8 de abril de 2026).
+@codemix/graph cubre un hueco que nadie estaba llenando: una base de datos de grafos que puedes meter en tu aplicación de TypeScript, tipar con Zod, consultar con Cypher, recorrer con Gremlin, indexar correctamente y encima compartir en tiempo real entre pares sin nada de infraestructura. Es ambicioso para un proyecto que acaba de nacer (se publicó en npm el 8 de abril de 2026).
 
-Lo que más valoro es la honestidad: está marcado como alpha, y el README advierte que lo usan en producción pero con cuidado. Me parece el enfoque correcto. La combinación de CRDT con grafos tipados es tan potente que merece la pena seguir el proyecto de cerca — nació hace apenas dos semanas en GitHub — pero todavía no es algo que pondría en producción sin un safety net.
+Lo que más valoro es la honestidad: está marcado como alpha, y el README advierte que lo usan en producción pero con cuidado. Me parece el enfoque correcto. La combinación de CRDT con grafos tipados es tan potente que merece la pena seguir el proyecto de cerca — nació hace apenas dos semanas en GitHub — pero todavía no es algo que pondría en producción sin una red de seguridad.
 
 Lo que echo en falta: no vi soporte para persistencia más allá de Yjs (que es in-memory con providers de almacenamiento opcional), y el subconjunto de Cypher no cubre todavía patrones avanzados como APOC procedures. Pero para un proyecto tan joven, la API ya es impresionantemente coherente.
 

@@ -5,7 +5,7 @@ tags: ["assembly", "x86", "optimizacion", "compiladores", "low-level"]
 excerpt: "Raymond Chen explica por qué `xor eax, eax` se impuso como idioma para poner a cero un registro x86, aunque `sub` tiene mejores flags."
 ---
 
-El otro día, mientras revisaba Hacker News, me encontré con un artículo de Raymond Chen —sí, el de *The Old New Thing*— que aborda una pregunta que jamás me había planteado: si `xor eax, eax` es el idioma estándar para poner a cero un registro en x86, ¿por qué no usamos `sub eax, eax`? Ambas ocupan dos bytes, ambas tardan lo mismo en ejecutarse, y `sub` incluso comporta mejor las banderas de estado. El artículo acumulaba cerca de ciento setenta puntos en HN y generó una discusión nostálgica entre programadores de sistemas. Me picó la curiosidad.
+El otro día, mientras revisaba Hacker News, me encontré con un artículo de Raymond Chen —sí, el de *The Old New Thing*— que aborda una pregunta que jamás me había planteado: si `xor eax, eax` es el idioma estándar para poner a cero un registro en x86, ¿por qué no usamos `sub eax, eax`? Ambas ocupan dos bytes, ambas tardan lo mismo en ejecutarse y `sub` incluso tiene un mejor comportamiento de las banderas de estado. El artículo acumulaba cerca de ciento setenta puntos en HN y generó una discusión nostálgica entre programadores de sistemas. Me picó la curiosidad.
 
 El contexto es sencillo. La arquitectura x86 no tiene un registro dedicado a cero. Si necesitas anular, digamos, `eax`, debes hacerlo tú mismo. La opción más compacta es `xor eax, eax` o `sub eax, eax`, ambas de dos bytes. La alternativa obvia, `mov eax, 0`, requiere cinco bytes porque incluye la constante de cuatro bytes. Por eso los compiladores desechan `mov` al optimizar. Pero entre `xor` y `sub`, ¿cuál es la diferencia real?
 
@@ -108,9 +108,9 @@ Ambas funciones devuelven cero, pero la primera deja AF indefinida, mientras que
 
 ## Mi opinión
 
-Este artículo me recordó por qué me fascinan los detalles de bajo nivel. En la superficie, `xor eax, eax` es solo una curiosidad mnemotécnica que memorizamos una vez y repetimos para siempre. Pero bajo esa aparente banalidad hay una historia sobre cómo las comunidades de programación toman decisiones colectivas, cómo los compiladores establecen costumbres que el hardware posterior ratifica, y cómo una ventaja inicial arbitraria puede cristalizarse en estándar.
+Este artículo me recordó por qué me fascinan los detalles de bajo nivel. En la superficie, `xor eax, eax` es solo una curiosidad mnemotécnica que memorizamos una vez y repetimos para siempre. Pero bajo esa aparente banalidad hay una historia sobre cómo las comunidades de programación toman decisiones colectivas, cómo los compiladores establecen costumbres que el hardware posterior ratifica y cómo una ventaja inicial arbitraria puede cristalizarse en estándar.
 
-Personalmente, creo que Chen tiene razón: el triunfo de `xor` fue un accidente histórico. Si los primeros compiladores de DOS hubieran preferido `sub`, hoy estaríamos escribiendo `sub` sin pensarlo. La lección general es que los idiomas de programación —incluso los de ensamblador— están moldeados tanto por la conveniencia social como por la optimización estricta. Como programadores, deberíamos ser conscientes de cuándo seguimos una convención porque tiene mérito técnico, y cuándo simplemente imitamos a la manada.
+Personalmente, creo que Chen tiene razón: el triunfo de `xor` fue un accidente histórico. Si los primeros compiladores de DOS hubieran preferido `sub`, hoy estaríamos escribiendo `sub` sin pensarlo. La lección general es que los idiomas de programación —incluso los de ensamblador— están moldeados tanto por la conveniencia social como por la optimización estricta. Como programadores, deberíamos ser conscientes de cuándo seguimos una convención porque tiene mérito técnico y cuándo simplemente imitamos a la manada.
 
 Y ahí va un detalle personal: según cuenta Chen, uno de sus antiguos colegas usaba `sub` a propósito para anular registros. Leía código ensamblador y sabía quién lo había escrito solo por esa elección. Es un bonito recordatorio de que, incluso en el nivel más bajo, el estilo es identidad.
 
