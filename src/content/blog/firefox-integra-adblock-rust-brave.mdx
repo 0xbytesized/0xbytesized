@@ -1,0 +1,129 @@
+---
+title: "Firefox integra el motor adblock de Brave en Rust"
+date: 2026-04-25T15:33
+tags: ["firefox", "rust", "adblock", "rendimiento", "privacidad"]
+excerpt: "Mozilla integra adblock-rust, el motor de bloqueo de Brave, en Firefox. Analizamos el impacto en privacidad y rendimiento del navegador."
+---
+
+Ayer vi aparecer en Hacker News una noticia que me llamó la atención de inmediato: **Firefox ha integrado el motor de bloqueo de anuncios de Brave**. Sí, has leído bien. El navegador del zorro naranja ha incorporado `adblock-rust`, la biblioteca Rust que Brave lleva años usando para su bloqueo nativo. Y no es un experimento menor: en GitHub, `brave/adblock-rust` acumula ya más de 2.300 estrellas y está en su versión **0.12.2**.
+
+Mozilla lo ha confirmado a través de ItsFoss: el equipo está experimentando con formas de mejorar la Protección Antirrastreo Mejorada (*Enhanced Tracking Protection*, ETP) que ya incluye Firefox por defecto. Y una de las bibliotecas que van a probar es precisamente `adblock-rust`.
+
+Pero ojo, que esto no significa que Firefox vaya a cargarse el soporte de extensiones MV2 ni que vaya a convertir su ETP en un bloqueador total al estilo de uBlock Origin. De hecho, Mozilla ha sido clara al respecto: no hay planes de abandonar las extensiones MV2. Esto es más sutil: es una mejora de infraestructura.
+
+## ¿Qué es exactamente adblock-rust?
+
+`adblock-rust` es el motor que impulsa el bloqueo nativo de Brave. Está escrito en Rust (obviamente), y no es un simple wrapper alrededor de listas de filtros: implementa el *parseo* completo de reglas de sintaxis Adblock Plus (EasyList, EasyPrivacy), soporta filtrado cosmético, reemplazo de recursos, sintaxis de hosts y extensiones de sintaxis de uBlock Origin.
+
+Se publica como crate en crates.io (`adblock`) y también como paquete npm (`adblock-rs`), además de tener bindings comunitarios para Python. Esto significa que se puede usar desde dentro del navegador (compilado a nativo) o desde herramientas externas como proxies o scrapers (vía WASM o bindings JS).
+
+La versión actual, 0.12.2, tiene dependencias sólidas: `regex`, `url`, `serde`, `cssparser` (opcional), `selectors` (opcional), y `flatbuffers` para serialización. Todo muy en la línea de lo que esperas de una biblioteca Rust moderna y bien construida.
+
+## ¿Qué cambio supone para Firefox?
+
+Hasta ahora, Firefox usaba su propio sistema de bloqueo para ETP, basado en la lista Disconnect y un conjunto de reglas internas. No era un adblocker completo: bloqueaba rastreadores conocidos y cookies de terceros, pero no intentaba eliminar anuncios ni aplicar filtros cosméticos.
+
+Con `adblock-rust` integrado, Firefox gana de golpe:
+
+1. **Un parser de reglas profesional.** En lugar de mantener su propio formato de listas, puede consumir directamente las mismas listas que uBlock Origin y Brave: EasyList, EasyPrivacy, Fanboy's Annoyances, etc.
+2. **Rendimiento nativo Rust.** La biblioteca está optimizada para throughput alto y uso de memoria predecible. En los benchmarks del proyecto, el matching de URLs contra listas de cientos de miles de reglas se hace en microsegundos.
+3. **Filtrado cosmético.** Más allá de bloquear peticiones de red, `adblock-rust` puede ocultar elementos del DOM, lo que permite eliminar espacios reservados para anuncios y mejorar la experiencia visual.
+4. **Portabilidad a iOS.** Una de las quejas recurrentes de los usuarios de Firefox en iOS es que no pueden usar bloqueadores de contenido tan potentes como en desktop. `adblock-rust` tiene soporte para convertir reglas al formato de *content blocking* de Apple, lo que abre la puerta a un ETP mucho más potente en Safari WebKit (el motor que Apple obliga a usar en iOS).
+
+## Cómo se usa adblock-rust por fuera
+
+Para que te hagas una idea de cómo funciona la biblioteca, aquí va un ejemplo en Rust. No es código que vaya a ejecutar Firefox internamente, pero muestra la API que hay detrás:
+
+```rust
+use adblock::engine::Engine;
+use adblock::lists::{FilterSet, ParseOptions};
+use adblock::request::Request;
+
+fn main() {
+    let mut filter_set = FilterSet::new(false);
+
+    // Añadir una regla EasyList directamente
+    filter_set.add_filter(
+        "||doubleclick.net^",
+        ParseOptions::default(),
+    );
+
+    // Cargar una lista completa desde string
+    let easylist = include_str!("easylist.txt");
+    filter_set.add_filters(easylist, ParseOptions::default());
+
+    // Compilar el engine
+    let engine = Engine::from_filter_set(filter_set, true);
+
+    // Probar un URL construyendo un Request
+    let url = "https://ad.doubleclick.net/something";
+    let source = "https://example.com";
+    let req = Request::new(url, source, "script").unwrap();
+
+    let result = engine.check_network_request(&req);
+
+    println!("Bloqueado: {}", result.matched);
+    // Imprime: Bloqueado: true
+}
+```
+
+El flujo es simple: construyes un `FilterSet`, cargas reglas (una a una o en bloque), lo conviertes en un `Engine` y empiezas a hacer consultas. El método `check_network_urls` recibe la URL de la petición, el dominio de la página y el tipo de recurso, y devuelve si debe bloquearse o no.
+
+También hay bindings para Node.js, que permiten usarlo desde herramientas JavaScript sin tener que tocar Rust:
+
+```javascript
+import { Engine, FilterSet } from 'adblock-rs';
+
+const filterSet = new FilterSet(false);
+
+filterSet.addFilter('||example.com/ads^');
+filterSet.addFilter('@@||example.com/ads/important^');
+
+const engine = new Engine(filterSet, true);
+
+const result = engine.check(
+  'https://example.com/ads/tracker.js',
+  'https://example.com',
+  'script'
+);
+console.log('Bloqueado:', result.matched);
+// false — la excepción @@ ha desbloqueado la subruta
+
+const result2 = engine.check(
+  'https://example.com/ads/spy.js',
+  'https://example.com',
+  'script'
+);
+console.log('Bloqueado:', result2.matched);
+// true
+```
+
+Fíjate en el detalle de la excepción: `@@` es la sintaxis de Adblock Plus para *excepciones*, y el motor la respeta automáticamente. No tienes que gestionar prioridades manualmente.
+
+## ¿Qué opinan los comentaristas de HN?
+
+El hilo en Hacker News (331 puntos, 12 comentarios en el momento de escribir esto) es interesante porque nadie está en el extremo. El comentario más votado, de `evilpie`, reproduce la postura oficial de Mozilla y aclara que la integración es experimental y no reemplazará a las extensiones MV2. Otros usuarios, como `MrAlex94`, advierten que no hay que leer demasiado entre líneas — esto no es un adblocker completo, es una mejora de ETP.
+
+Pero también hay voces escépticas. `devsda` teme que este movimiento sea el preludio para eliminar el soporte de extensiones MV2, argumentando que si Firefox ya tiene un bloqueador nativo, ¿para qué necesitas uBlock Origin? Es un miedo comprensible, pero Mozilla ha sido bastante explícita al negarlo.
+
+Y luego está el usuario de Brave que comenta que lleva años usando ese navegador y que el cambio ha sido increíble. Cada uno cuenta la feria según le va.
+
+## Mi opinión
+
+Me parece una jugada inteligente por parte de Mozilla, pero también muy medida. Integrar `adblock-rust` no es un movimiento disruptivo — es una optimización de infraestructura que les permite:
+
+1. **Reducir costes de mantenimiento.** En lugar de mantener un parser de reglas propio, se suben a un proyecto consolidado y con comunidad.
+2. **Mejorar la protección base de todos los usuarios.** La mayoría de la gente no instala extensiones. Si ETP se vuelve más potente *sin que el usuario tenga que hacer nada*, eso es una victoria directa para la privacidad web.
+3. **Mantener vivo el ecosistema de extensiones.** Esto es clave: Mozilla no está canibalizando a uBlock Origin. Al contrario, al liberar recursos de mantenimiento interno, pueden centrarse en lo que realmente importa: la plataforma de extensiones y Gecko.
+
+Dicho esto, hay una pregunta que me ronda: ¿por qué Brave y Firefox colaboran en esto? Ambos son competidores directos en el espacio de los navegadores orientados a privacidad. La respuesta, creo, está en que `adblock-rust` es un *bien común*: está bajo MPL-2.0, y cualquier mejora que Mozilla aporte al proyecto beneficia a Brave también. Es software de código abierto funcionando exactamente como debería.
+
+Lo que me gustaría ver es si Mozilla lleva esta integración hasta sus últimas consecuencias: filtrado cosmético en ETP, soporte para listas personalizadas desde `about:preferences`, y un modo "duro" que se acerque a lo que ofrece uBlock Origin en modo medio. Si hacen eso, Firefox podría atraer a muchos usuarios que hoy están en Brave solo por el bloqueo nativo.
+
+Pero si se quedan a medio camino — solo mejoran ETP un poco y no tocan nada más — entonces esto será una nota al pie en la historia de Firefox. Y sería una pena, porque el potencial está ahí.
+
+## Veredicto
+
+Firefox ha dado un paso pequeño pero significativo. Integrar `adblock-rust` no va a cambiar el mundo mañana, pero sienta las bases para un bloqueo nativo mucho más potente sin depender de terceros. Y todo en Rust, que siempre es un plus.
+
+Ahora toca esperar a que llegue a Nightly y ver cómo se comporta en el mundo real.
