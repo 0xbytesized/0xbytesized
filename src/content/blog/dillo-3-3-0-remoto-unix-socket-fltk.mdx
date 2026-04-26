@@ -1,0 +1,86 @@
+---
+title: "Dillo 3.3.0: navegador ligero con control remoto por UNIX socket"
+date: "2026-04-26T22:20"
+slug: "dillo-3-3-0-remoto-unix-socket-fltk"
+tags: ["dillo", "navegadores", "fltk", "software-libre", "unix"]
+excerpt: "Dillo 3.3.0 llega con dilloc, un sistema de control remoto por UNIX socket, soporte experimental de FLTK 1.4 y un montón de mejoras internas."
+---
+
+Hoy se ha liberado **Dillo 3.3.0**, y aunque Dillo no ocupe portadas como Chrome o Firefox, esta release tiene miga. Para quien no lo conozca: Dillo es un navegador web gráfico, minimalista, escrito en C++ sobre FLTK. No tiene JavaScript, no tiene CSS complejo, no pesa 200 MB. Ocupa 1.4 megas de tarball y corre en cualquier sitio donde corra FLTK. Es el navegador que usas cuando el resto del mundo es demasiado pesado.
+
+Y esta versión trae cosas que, sinceramente, me han sorprendido para un proyecto de esta escala.
+
+## dilloc: control remoto por UNIX socket
+
+La novedad estrella es **dilloc**, un programa aparte que permite controlar Dillo desde la línea de comandos a través de un socket UNIX. No es un API HTTP, no es una conexión TCP remota. Es un socket local, como dios manda.
+
+```bash
+# Comprobar que Dillo responde
+dilloc ping
+
+# Recargar la pestaña actual
+dilloc reload
+
+# Abrir una URL
+dilloc open https://example.com
+
+# Volcar el HTML de la pestaña actual
+dilloc dump
+
+# Esperar a que termine de cargar (con timeout de 10s)
+dilloc wait 10
+```
+
+Esto puede no parecer gran cosa, pero abre la puerta a automatizaciones muy interesantes. Te imaginas un script que abre una página, espera a que cargue, vuelca el contenido y lo procesa con grep o jq? Pues exactamente eso.
+
+Lo que más me gusta es que el diseño es limpio. No hay magia: `dilloc` busca el PID en la variable de entorno `DILLO_PID`, o localiza un Dillo en ejecución si la variable no está definida. Cada comando devuelve 0 en éxito y distinto de 0 en error. Sencillo, predecible, UNIX.
+
+## Page actions: scripts desde el menú contextual
+
+Otra feature que me ha llamado la atención son las **page actions**. Puedes definir entradas personalizadas en el menú contextual (clic derecho sobre la página) que ejecutan scripts arbitrarios. La configuración va en `~/.dillo/dillorc`:
+
+```bash
+page_action="Mimic Chrome:curl_chrome136 $url | dilloc load"
+```
+
+Cuando seleccionas "Mimic Chrome" en el menú, Dillo lanza `curl_chrome136` (una utilidad que imita el User-Agent de Chrome 136), obtiene el HTML y lo inyecta directamente en la pestaña actual a través de `dilloc load`. Es un pipe shell clásico, pero conectado al navegador.
+
+Esto es poderosísimo. Puedes tener un script que arregle páginas rotas, que inyecte CSS, que traduzca contenido. Aquí va otro ejemplo:
+
+```bash
+# ~/.dillo/dillorc
+page_action="Fix page:~/.dillo/actions/fixpage.sh"
+page_action="Dark mode:cat $url | sed 's/<\\/style>/body{filter:invert(1)}<\\/style>/' | dilloc load"
+```
+
+El ecosistema de page actions convierte a Dillo en un navegador extensible sin plugins, sin extensiones, sin WebExtensions API. Solo scripts shell y pipes.
+
+## FLTK 1.4: el salto generacional del toolkit
+
+Dillo siempre ha usado **FLTK 1.3** como toolkit gráfico. FLTK 1.4 lleva años en desarrollo y trae mejoras de rendering, soporte de Wayland, y alta densidad de píxeles (HiDPI). Con esta release, Dillo da el primer paso con soporte experimental:
+
+```bash
+./configure --enable-experimental-fltk
+make
+sudo make install
+```
+
+Eso sí, el propio equipo advierte que no está listo para producción. Con FLTK 1.4.5 (la última versión) se ve bien en X11 a 96 DPI, pero en Wayland y pantallas con densidades no múltiplo de 96 hay problemas de nitidez. Lo etiquetan como experimental y piden testers, no usuarios de a pie. Me parece una postura responsable.
+
+El movimiento me parece acertado. FLTK 1.4 va a ser el futuro del toolkit, y cuanto antes empiece Dillo a adaptarse, mejor. Pero también entiendo que no quieran lanzarlo como predeterminado hasta que la experiencia sea sólida.
+
+## OAuth y cookies: el problema de ser minimalista
+
+Una de las limitaciones históricas de Dillo es que, al no tener un motor JavaScript, muchos sitios directamente no funcionan. Pero hay un caso más sutil: el **OAuth login**. Resulta que Dillo bloquea por defecto todas las cookies de terceros que no vienen de una petición iniciada por el usuario. Esto es bueno para privacidad, pero rompe el flujo de OAuth, donde la cookie de sesión se establece en una redirección 30X.
+
+La solución en 3.3.0 es elegante: añadir una excepción para cookies establecidas en redirecciones de la página principal, pero solo cuando la petición la inició el usuario. Así mantienen la protección contra píxeles de tracking sin romper el login en servicios como el Fediverso (Smolfedi).
+
+## Mi veredicto
+
+Dillo 3.3.0 no va a cambiar el mundo. No va a competir con Chromium ni con Firefox. Pero no es ese su objetivo. Dillo es el navegador que instalas en una máquina con 256 MB de RAM, en un servidor headless al que te conectas por X forwarding, o en ese Raspberry Pi que usas como quiosco. Y para esos casos, esta release es un paso adelante enorme.
+
+Lo que más valoro es la coherencia del proyecto. Dillo lleva más de 25 años existiendo y sigue siendo fiel a su filosofía: pequeño, rápido, predecible. Las page actions y dilloc no son features para atraer usuarios de Chrome. Son herramientas para quien ya entiende y valora el modelo UNIX de herramientas pequeñas que hacen una cosa bien.
+
+Si tienes un proyecto donde necesitas un navegador headless o embebido, échale un ojo. La combinación de `dilloc` + page actions + el peso irrisorio del binario lo convierte en un candidato excelente para automatización de navegación ligera. No necesitas Puppeteer ni Playwright si lo que quieres es hacer peticiones y volcar HTML.
+
+El tarball está en [dillo-browser.org](https://dillo-browser.org/release/3.3.0/), y el código fuente en su propio git (también mirror en Codeberg y SourceHut, porque han migrado de GitHub). Son 1.4 MB. Descárgalo, compílalo, y acuérdate de lo pequeños que podían ser los navegadores.
