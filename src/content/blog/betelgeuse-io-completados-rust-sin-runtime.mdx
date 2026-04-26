@@ -10,7 +10,7 @@ Pekka Enberg, investigador conocido por su trabajo en el kernel de Linux y coaut
 
 ## El problema con los futuros
 
-En Rust, la respuesta estándar a la concurrencia de red y disco es Tokio: un runtime multi-hilo con work-stealing, colas de tareas y una enorme cantidad de sincronización implícita. Para muchas aplicaciones esto funciona. Pero cuando la carga crece, los costos aparecen: cache misses por migración de tareas entre núcleos, colas de trabajo que crecen hasta consumir memoria, y sobresincronización que el programador no controla directamente.
+En Rust, la respuesta estándar a la concurrencia de red y disco es Tokio: un runtime multi-hilo con work-stealing, colas de tareas y una enorme cantidad de sincronización implícita. Para muchas aplicaciones esto funciona. Pero cuando la carga crece, los costos aparecen: cache misses por migración de tareas entre núcleos, colas de trabajo que crecen hasta consumir memoria y sobresincronización que el programador no controla directamente.
 
 Betelgeuse parte de una premisa distinta, inspirada en el diseño de TigerBeetle: si los dispositivos de I/O modernos son tan rápidos que la CPU se ha convertido en el cuello de botella, entonces la abstracción debe ser mínima. Nada debe ejecutarse a menos que alguien lo pida explícitamente.
 
@@ -21,7 +21,7 @@ En lugar de futuros, Betelgeuse usa **completados** (*completions*). El flujo es
 1. El llamador prepara una operación y entrega un `&mut Completion` al backend.
 2. El backend traduce la operación a una syscall (por ejemplo, `io_uring_enter` en Linux o `kevent` en macOS).
 3. Cuando la operación termina, el backend deposita el resultado semántico en el mismo `Completion`.
-4. El llamador revisa el slot, consume el resultado, y lo recicla.
+4. El llamador revisa el slot, consume el resultado y lo recicla.
 
 Nada avanza sin un `step()`. No hay wakeups, no hay poll, no hay runtime oculto.
 
@@ -59,7 +59,7 @@ fn leer_cabecera() -> std::io::Result<Vec<u8>> {
 }
 ```
 
-Fíjate en la diferencia con `async`/`await`: aquí el control es total. El bucle decide cuándo avanzar el backend, cuándo revisar el completado, y cuándo rendir el hilo.
+Fíjate en la diferencia con `async`/`await`: aquí el control es total. El bucle decide cuándo avanzar el backend, cuándo revisar el completado y cuándo rendir el hilo.
 
 ## Un servidor TCP paso a paso
 
@@ -100,13 +100,13 @@ El slot `accept_slot` es propiedad del servidor, no del runtime. Puedes tenerlo 
 
 En Linux, Betelgeuse se apoya directamente en `io_uring`. El backend `IoUringIO` crea un anillo de 256 entradas (ajustable dinámicamente a la mitad si `ENOMEM` fuerza reducirlo), encola operaciones traduciendo `Completion` a `io_uring_sqe`, y cosecha resultados con `io_uring_enter`. No hay runtime de por medio, no hay thread pool, no hay work-stealing.
 
-En macOS usa `kqueue` a través del backend `DarwinIO`. La interfaz pública es la misma: un `IOLoop` que entiende `step()`, un `IO` que entiende sockets y archivos, y un `Completion` que el llamador posee.
+En macOS usa `kqueue` a través del backend `DarwinIO`. La interfaz pública es la misma: un `IOLoop` que entiende `step()`, un `IO` que entiende sockets y archivos y un `Completion` que el llamador posee.
 
 Esto permite algo poco común en Rust: **deterministic simulation testing** (DST). Si reemplazas el backend nativo por uno simulado, el mismo binario de aplicación puede ejecutarse bajo tiempos controlados, órdenes de I/O prefijados e inyección de fallos, sin cambiar una línea de código de la lógica de negocio. Eso es prácticamente imposible en un modelo basado en futuros donde tareas ocultas avanzan de forma no determinista.
 
 ## Mi opinión
 
-Betelgeuse me parece una respuesta necesaria al abismo de complejidad que Tokio puede convertirse en servidores de alta frecuencia. La decisión de eliminar `async`/`await` no es nostalgia por el código síncrono; es una apuesta deliberada por la predictibilidad. Cuando nada corre a menos que tú llames `step()`, el profiling se simplifica, los bugs de carrera desaparecen, y el model checking se vuelve factible.
+Betelgeuse me parece una respuesta necesaria al abismo de complejidad que Tokio puede convertirse en servidores de alta frecuencia. La decisión de eliminar `async`/`await` no es nostalgia por el código síncrono; es una apuesta deliberada por la predictibilidad. Cuando nada corre a menos que tú llames `step()`, el profiling se simplifica, los bugs de carrera desaparecen y el model checking se vuelve factible.
 
 También valoro la restricción consciente del scope: Betelgeuse no es un framework. No resuelve framing de protocolos, no maneja buffer pools, no implementa consenso. Es una capa de I/O con un contrato claro: tú tienes los completados, el backend tiene las syscalls.
 
@@ -116,4 +116,4 @@ No obstante, como demostración de que Rust puede hacer I/O de alto rendimiento 
 
 ## Conclusión
 
-Betelgeuse no pretende reemplazar a Tokio para el noventa y nueve por ciento de los proyectos. Pero para ese uno por ciento donde cada ciclo de CPU cuenta y la no-determinación del scheduler es un enemigo, propone una alternativa austera: I/O por completados, un bucle, y nada más. Cuando los fundamentos son sólidos, no hace falta magia.
+Betelgeuse no pretende reemplazar a Tokio para el noventa y nueve por ciento de los proyectos. Pero para ese uno por ciento donde cada ciclo de CPU cuenta y la no-determinación del scheduler es un enemigo, propone una alternativa austera: I/O por completados, un bucle y nada más. Cuando los fundamentos son sólidos, no hace falta magia.

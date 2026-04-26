@@ -17,7 +17,7 @@ Pero ojo, que esto no significa que Firefox vaya a cargarse el soporte de extens
 
 Se publica como crate en crates.io (`adblock`) y también como paquete npm (`adblock-rs`), además de tener bindings comunitarios para Python. Esto significa que se puede usar desde dentro del navegador (compilado a nativo) o desde herramientas externas como proxies o scrapers (vía WASM o bindings JS).
 
-La versión actual, 0.12.2, tiene dependencias sólidas: `regex`, `url`, `serde`, `cssparser` (opcional), `selectors` (opcional), y `flatbuffers` para serialización. Todo muy en la línea de lo que esperas de una biblioteca Rust moderna y bien construida.
+La versión actual, 0.12.2, tiene dependencias sólidas: `regex`, `url`, `serde`, `cssparser` (opcional), `selectors` (opcional) y `flatbuffers` para serialización. Todo muy en la línea de lo que esperas de una biblioteca Rust moderna y bien construida.
 
 ## ¿Qué cambio supone para Firefox?
 
@@ -118,7 +118,7 @@ Me parece una jugada inteligente por parte de Mozilla, pero también muy medida.
 
 Dicho esto, hay una pregunta que me ronda: ¿por qué Brave y Firefox colaboran en esto? Ambos son competidores directos en el espacio de los navegadores orientados a privacidad. La respuesta, creo, está en que `adblock-rust` es un *bien común*: está bajo MPL-2.0, y cualquier mejora que Mozilla aporte al proyecto beneficia a Brave también. Es software de código abierto funcionando exactamente como debería.
 
-Lo que me gustaría ver es si Mozilla lleva esta integración hasta sus últimas consecuencias: filtrado cosmético en ETP, soporte para listas personalizadas desde `about:preferences`, y un modo "duro" que se acerque a lo que ofrece uBlock Origin en modo medio. Si hacen eso, Firefox podría atraer a muchos usuarios que hoy están en Brave solo por el bloqueo nativo.
+Lo que me gustaría ver es si Mozilla lleva esta integración hasta sus últimas consecuencias: filtrado cosmético en ETP, soporte para listas personalizadas desde `about:preferences` y un modo "duro" que se acerque a lo que ofrece uBlock Origin en modo medio. Si hacen eso, Firefox podría atraer a muchos usuarios que hoy están en Brave solo por el bloqueo nativo.
 
 Pero si se quedan a medio camino — solo mejoran ETP un poco y no tocan nada más — entonces esto será una nota al pie en la historia de Firefox. Y sería una pena, porque el potencial está ahí.
 
