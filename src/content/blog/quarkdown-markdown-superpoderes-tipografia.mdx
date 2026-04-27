@@ -1,0 +1,105 @@
+---
+title: "Quarkdown: Markdown con superpoderes para tipografía moderna"
+date: "2026-04-27T17:00"
+tags:
+  - quarkdown
+  - markdown
+  - kotlin
+  - typesetting
+  - latex
+excerpt: "Quarkdown lleva Markdown al siguiente nivel: un sistema de tipografía que compila a papers, presentaciones y sitios web desde un mismo código fuente."
+---
+
+Llevo años generando contenido en Markdown. Es mi formato natural: ligero, legible, sin fricción. Pero hay una frontera que nunca he podido cruzar con él: los documentos con formato tipográfico serio. Papers académicos, presentaciones, libros maquetados. Para eso estaba LaTeX. O al menos, hasta ahora.
+
+**Quarkdown** acaba de aterrizar en el top de Hacker News con más de 10.000 estrellas en GitHub y promete algo que suena a herejía: escribir una vez en Markdown y obtener un paper listo para publicar, una presentación interactiva o una wiki documental. Sin cambiar de sintaxis.
+
+Y lo más interesante: está escrito en **Kotlin**, compila a velocidad rayo, y viene con un sistema de scripting Turing-completo embebido en el propio Markdown.
+
+## ¿Qué hace Quarkdown diferente?
+
+Markdown tradicional tiene un problema: cuando necesitas hacer algo fuera de lo común, te chocas contra un muro. ¿Tablas complejas? ¿Notas al pie? ¿Control de diseño? Tienes que caer en HTML embebido o rendirte.
+
+Quarkdown extiende CommonMark con lo que llaman el *Quarkdown Flavor*: una sintaxis que añade **funciones**, **variables**, y un **sistema de tipos** directamente en Markdown. El resultado es que puedes tener lógica condicional, bucles, y generación dinámica de contenido sin salirte del flujo de escritura.
+
+Así se declara una función:
+
+```markdown
+.function {cita-destacada}
+    autor texto:
+    > **.texto**
+    > — .autor
+```
+
+Y así se usa:
+
+```markdown
+.cita-destacada {autor: Edsger Dijkstra} {texto: La simplicidad es la máxima sofisticación.}
+```
+
+Esto genera un blockquote con formato directamente en el documento final. No es HTML embebido, no es un preprocesador externo. Es Markdown que se comporta como un lenguaje de programación.
+
+## ¿Cómo funciona por debajo?
+
+Quarkdown está escrito en Kotlin y compila a HTML con diferentes *targets* o modos de salida:
+
+- **Paged**: para papers y libros, usando paged.js para simular páginas físicas.
+- **Slides**: presentaciones interactivas basadas en reveal.js.
+- **Docs**: wikis y documentación técnica con navegación lateral.
+- **Plain**: flujo continuo al estilo Notion u Obsidian.
+
+Cada target tiene su propio motor de renderizado, pero comparten el mismo pipeline de compilación. El parser transforma el Markdown extendido en un AST, luego un sistema de plugins recorre ese árbol evaluando funciones, resolviendo variables y aplicando transformaciones, y finalmente el generador de salida produce el HTML correspondiente.
+
+Lo que me llamó la atención es que no intenta ser un "LaTeX killer". Al revés: puedes incrustar expresiones matemáticas con sintaxis LaTeX estándar y se renderizan con MathJax o KaTeX según el target. Las funciones se combinan con el resto de la sintaxis Markdown sin fricción.
+
+```
+.function {card}
+    titulo contenido:
+    <div class="card">
+        <h3>.titulo</h3>
+        <p>.contenido</p>
+    </div>
+
+.card {titulo: Hola mundo} {contenido: Esto es una card generada desde Markdown.}
+```
+
+Sin salir del Markdown, tienes lógica reusable y HTML semántico. Es exactamente el tipo de flexibilidad que he echado de menos en cientos de documentos.
+
+## La parte que me convence: el sistema de temas
+
+Lo que más me gusta de Quarkdown es que los temas son archivos de estilo que se aplican en compilación, no durante la escritura. Puedes escribir un documento y luego cambiarlo completamente de aspecto sin tocar el contenido.
+
+```
+quarkdown build --theme academic
+quarkdown build --theme slides-dark
+```
+
+Cada tema es un paquete de CSS + configuración que controla márgenes, tipografías, colores, espaciado y hasta la estructura de navegación. Hay temas oficiales y la comunidad ya está publicando los suyos propios.
+
+Para un proyecto como mi blog, donde a veces quiero escribir un tutorial largo y otras veces una presentación, esto es increíblemente práctico. El mismo `.md` puede ser un post en Astro y una charla en reveal.js.
+
+```yaml
+# quarkdown.yml
+project:
+  title: "Mi investigación"
+  author: "0xbytesized"
+targets:
+  paper:
+    theme: academic
+    output: pdf
+  slides:
+    theme: slides-dark
+    output: html
+```
+
+Un solo archivo de configuración, dos salidas, cero duplicación de contenido.
+
+## Mi veredicto
+
+Quarkdown me parece un proyecto ambicioso en el mejor sentido. Coge un formato que todos conocemos (Markdown), identifica sus limitaciones reales (falta de control tipográfico, nula capacidad de scripting), y las resuelve sin romper la experiencia base. No necesitas aprender un nuevo lenguaje, solo extender lo que ya sabes.
+
+Tiene 10.000 estrellas por una razón: resuelve un problema real. No todo el mundo necesita LaTeX. De hecho, la mayoría de la gente escribe documentos sencillos con Markdown y luego sufre intentando maquetarlos. Quarkdown tiende un puente entre la simplicidad del Markdown y el rigor tipográfico de LaTeX.
+
+¿Es un reemplazo de LaTeX para papers de matemáticas avanzadas? Probablemente no todavía. Pero para el 90% de los documentos técnicos que escribe un desarrollador —documentación técnica, propuestas, informes, presentaciones— es más que suficiente. Y la velocidad de compilación en Kotlin hace que el *feedback loop* sea instantáneo, algo que cualquier usuario de LaTeX agradecerá.
+
+Le voy a seguir la pista. Si la comunidad crece al ritmo que parece, Quarkdown podría convertirse en el estándar de facto para documentación técnica en los próximos años.
