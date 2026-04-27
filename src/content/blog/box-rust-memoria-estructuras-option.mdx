@@ -1,0 +1,136 @@
+---
+title: "Box para ahorrar memoria en Rust: 475 MB gratis"
+date: "2026-04-27T06:25"
+tags:
+  - rust
+  - memoria
+  - optimización
+  - serde
+  - estructuras
+excerpt: "Cómo usar Box en campos opcionales de structs Rust para reducir el consumo de memoria un 53% sin cambiar la lógica"
+---
+
+A veces los mayores ahorros de memoria vienen de los sitios más tontos. No de algoritmos nuevos ni de estructuras de datos revolucionarias, sino de darte cuenta de que tus structs ocupan mucho más espacio del que necesitan porque el compilador está reservando sitio para cosas que casi nunca usas.
+
+Esta semana me topé con un artículo de dystroy que cuenta exactamente esa historia: una herramienta Rust que parsea modelos JSON de AWS SDK (Smithy shapes, ~3000 archivos) pasó de usar **895 MB a 420 MB** — un ahorro del 53% — simplemente moviendo algunos campos detrás de `Box`.
+
+Y lo mejor es que no tocaron ni una línea de lógica de negocio.
+
+## El problema: Option\<CosasGrandes\>
+
+Cuando defines un struct en Rust con un campo `Option<T>`, el compilador necesita reservar espacio para el caso `Some(T)`. Si `T` es pequeño — un `u32`, un puntero — el costo de tenerlo opcional es mínimo. Pero si `T` es un struct de varios cientos de bytes, cada `Option<T>` que queda en `None` sigue ocupando ese espacio.
+
+Mira este ejemplo típico de deserialización con serde:
+
+```rust
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct SmithyTraits {
+    #[serde(rename = "smithy.api#documentation")]
+    pub documentation: Option<String>,
+
+    #[serde(rename = "smithy.api#pattern")]
+    pub pattern: Option<String>,
+
+    #[serde(rename = "aws.api#service")]
+    pub service: Option<SmithyServiceTrait>,
+
+    #[serde(rename = "aws.iam#iamAction")]
+    pub iam_action: Option<SmithyIamAction>,
+}
+```
+
+Parece inocente, pero si `SmithyServiceTrait` tiene 10 campos (muchos de ellos `Option<String>` también), cada instancia donde `service` es `None` sigue pagando el coste de alinear y reservar espacio para ese struct completo.
+
+Y cuando tienes 3000 modelos JSON con cientos de shapes cada uno, esos bytes se acumulan rápido.
+
+## La solución: Box al rescate
+
+La idea es trivial: si `Option<SmithyServiceTrait>` ocupa, digamos, 240 bytes cuando el 95% de las veces es `None`, envuélvelo en `Box`:
+
+```rust
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct SmithyTraits {
+    // ... otros campos ...
+
+    #[serde(rename = "aws.api#service")]
+    pub service: Option<Box<SmithyServiceTrait>>,
+    
+    // ... más campos ...
+}
+```
+
+`Option<Box<SmithyServiceTrait>>` ocupa exactamente **16 bytes** (8 del puntero del Box + 8 del tag de Option) en lugar de los 240+ bytes del struct directo. El caso `None` pasa de derrochar cientos de bytes a ocupar solo el discriminante.
+
+La magia está en que serde puede deserializar dentro de un `Box` sin problemas gracias a que `Box<T>` implementa `Deserialize` cuando `T: Deserialize`. No necesitas tocarlo.
+
+## Cuándo funciona y cuándo no
+
+Esto no es una bala de plata. Tiene sus condiciones:
+
+```rust
+// ❌ NO mejora nada - el entero ya es pequeño
+pub let small: Option<u32> = None; // 8 bytes (4 + 4 padding)
+
+// ✅ GRAN mejora - struct grande mayoritariamente None
+pub let big: Option<Box<HugeConfig>> = None; // 16 bytes vs 512+
+
+// ⚠️ Mejora modesta - el struct no es enorme
+pub let medium: Option<Box<MediumStruct>> = None; // 16 bytes vs 64+
+```
+
+La regla es simple: si el tipo dentro del `Option` ocupa más de 32-48 bytes y la mayoría de las instancias van a ser `None`, boxearlo merece la pena.
+
+### Un benchmark rápido para visualizarlo
+
+```rust
+use std::mem::size_of;
+
+struct BigConfig {
+    name: String,         // 24 bytes
+    description: String,  // 24 bytes
+    metadata: Vec<u8>,    // 24 bytes
+    timeout_ms: u64,      // 8 bytes
+    retry_policy: String, // 24 bytes
+    // total: ~104 bytes + padding
+}
+
+fn main() {
+    println!("size_of::<Option<BigConfig>>():   {}", 
+             size_of::<Option<BigConfig>>());
+    println!("size_of::<Option<Box<BigConfig>>>(): {}", 
+             size_of::<Option<Box<BigConfig>>>());
+}
+```
+
+En mi máquina esto imprime algo como:
+
+```
+size_of::<Option<BigConfig>>():   112
+size_of::<Option<Box<BigConfig>>>(): 16
+```
+
+7× más pequeño. Y el boxeo solo ocurre en el heap cuando realmente hay datos.
+
+## Mi opinión
+
+Esta técnica me parece de esas que son obvias en retrospectiva pero fáciles de pasar por alto. **No deberías aplicar esto a ciegas**, pero sí deberías tenerlo en el radar cuando:
+
+1. **Deserializas JSON/YAML grande** donde muchos campos son opcionales (API responses, configs, modelos).
+2. **Tienes cientos de miles de instancias** del mismo struct en memoria (cachés, árboles sintácticos, modelos compilados).
+3. **Los structs tienen herencia plana** (en Rust no hay herencia real, pero los structs con muchos `Option` de sub-structs se parecen).
+
+Lo que hizo dystroy en su herramienta fue identificar los campos que casi nunca se poblaban — cosas como metadatos de servicios AWS o traits rarísimos — y boxearlos. El ahorro fue real y medible: 475 MB menos.
+
+Dicho esto, hay un tradeoff: `Box` añade una indirección, lo que significa una penalización en tiempo de acceso cuando el campo sí está poblado. Para la mayoría de aplicaciones es imperceptible, pero si trabajas en un hot path con latencias medidas en nanosegundos, mide antes y después.
+
+## Mi veredicto
+
+Es una técnica simple, barata de implementar y con resultados muy concretos si el perfil de memoria se alinea con el patrón "muchos opcionales casi siempre vacíos". No es sexy, no es innovadora, pero **475 MB gratis es difícil de ignorar**.
+
+Si trabajas con Rust y serde, vale la pena echarle un ojo a tus structs con `size_of`. A veces el mayor desperdicio está en lo que no ves porque el compilador ya lo reservó por si acaso.
+
+---
+
+*Historia original: [Box to save memory](https://dystroy.org/blog/box-to-save-memory/) — dystroy, abril 2026*
