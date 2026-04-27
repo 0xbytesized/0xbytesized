@@ -1,0 +1,137 @@
+---
+title: "Prompt API: IA local en el navegador sin servidores"
+date: "2026-04-27T10:29"
+tags:
+  - chrome
+  - javascript
+  - web-apis
+  - ia-local
+  - gemini
+excerpt: "Chrome incorpora la Prompt API con Gemini Nano: ejecuta modelos de lenguaje directamente en el navegador sin depender de servidores externos."
+---
+
+La Prompt API de Chrome es, para mí, una de esas cosas que cambian el tablero silenciosamente. No es un anuncio grandioso de AGI ni un modelo que resuelve problemas de matemáticas olimpiadas. Es más sencillo y, precisamente por eso, más interesante: **una API JavaScript que permite ejecutar un modelo de lenguaje pequeño directamente en el navegador del usuario**, sin llamadas a servidores, sin API keys, sin costes de inferencia.
+
+Y sí, funciona offline.
+
+## ¿Qué es exactamente la Prompt API?
+
+Formalmente, la Prompt API es una API de Chrome que expone Gemini Nano —el modelo más pequeño de la familia Gemini de Google— directamente al JavaScript de la página. El modelo se descarga una sola vez cuando el usuario visita un sitio que lo necesita, y a partir de ahí todo corre en local.
+
+El surface de la API es sorprendentemente limpio. No necesitas importar librerías ni configurar nada. El navegador expone un objeto global `LanguageModel` con el que interactúas:
+
+```javascript
+// Verificar si el modelo está disponible en este dispositivo
+const estado = await LanguageModel.availability({
+  expectedInputs: [{ type: 'text', languages: ['es'] }],
+  expectedOutputs: [{ type: 'text', languages: ['es'] }],
+});
+
+if (estado !== 'unavailable') {
+  console.log('Gemini Nano está listo para usar 🎉');
+} else {
+  console.log('Este dispositivo no soporta la API :(');
+}
+```
+
+El método `availability()` devuelve uno de tres valores: `'available'` (modelo descargado y listo), `'downloadable'` (el dispositivo lo soporta pero hay que descargar el modelo), o `'unavailable'` (no compatible).
+
+## Crear una sesión y empezar a preguntar
+
+Una vez verificada la disponibilidad, crear una sesión es trivial:
+
+```javascript
+const sesion = await LanguageModel.create({
+  initialPrompts: [
+    {
+      role: 'system',
+      content: 'Eres un experto en JavaScript que responde con ejemplos de código.',
+    },
+  ],
+  monitor(m) {
+    m.addEventListener('downloadprogress', (e) => {
+      console.log(`Descargando modelo: ${Math.round(e.loaded * 100)}%`);
+    });
+  },
+});
+
+const respuesta = await sesion.prompt(
+  '¿Cómo harías un debounce en JavaScript moderno?'
+);
+
+console.log(respuesta);
+```
+
+El objeto `monitor` es un detalle que me parece muy bien traído: como el modelo pesa varios cientos de megas, poder mostrar una barra de progreso evita que el usuario piense que la página se ha colgado.
+
+## Streaming y control de contexto
+
+Para respuestas largas, puedes usar `promptStreaming()` en lugar de `prompt()`. Esto te permite mostrar el texto conforme se va generando, como hacen ChatGPT o Claude:
+
+```javascript
+const sesion = await LanguageModel.create();
+const stream = sesion.promptStreaming(
+  'Explica paso a paso cómo funciona el event loop de JavaScript'
+);
+
+let respuestaCompleta = '';
+for await (const fragmento of stream) {
+  respuestaCompleta = fragmento;
+  document.getElementById('output').textContent = fragmento;
+}
+```
+
+Cada sesión mantiene un historial de conversación. Puedes consultar cuántos tokens llevas usando con `session.contextUsage` y `session.contextWindow`. Cuando el contexto se llena, las primeras interacciones se descartan automáticamente, aunque el system prompt nunca se elimina.
+
+```javascript
+console.log(`${sesion.contextUsage} / ${sesion.contextWindow} tokens usados`);
+
+// Escuchar cuando se desborda el contexto
+sesion.addEventListener('contextoverflow', () => {
+  console.log('El contexto se ha desbordado, se descartarán mensajes antiguos');
+});
+```
+
+## Lo que me gusta y lo que no
+
+**Mi opinión:** Esta API es importante no por lo que hace hoy, sino por lo que representa. Durante años, la IA en el navegador ha significado "llamar a una API remota". Eso tiene problemas: latencia, privacidad (todos tus datos viajan a un servidor), dependencia de conexión, y costes operativos para el desarrollador.
+
+La Prompt API cambia eso. El modelo se ejecuta en local, los datos nunca salen del dispositivo, y el coste de inferencia es cero para el desarrollador. Para aplicaciones como:
+
+- Correctores ortográficos y gramaticales contextuales
+- Clasificación de texto (spam, tono, categoría)
+- Asistentes de documentación offline
+- Traducción automática sin servidores
+
+...esto es enorme.
+
+Dicho esto, hay peros importantes:
+
+1. **Gemini Nano no es ChatGPT.** Es un modelo pequeño diseñado para ejecutarse en dispositivo. No esperes respuestas profundas o razonamiento complejo. Sirve para tareas concretas y acotadas.
+
+2. **El modelo pesa.** Son cientos de megas que el usuario tiene que descargar. No es algo que quieras en una página que se carga en segundos.
+
+3. **Solo Chrome.** De momento es una API específica de Chrome, en origin trial. Firefox y Safari no la tienen, y no está claro si la adoptarán.
+
+4. **Limitaciones de API.** No disponible en Web Workers (por la complejidad de establecer el permissions policy), y el control de temperatura/topK solo está disponible en Chrome Extensions.
+
+## ¿Cómo probarlo?
+
+Para desarrolladores, la Prompt API está disponible en Chrome Dev y Canary. Necesitas activar los flags `chrome://flags/#optimization-guide-on-device-model` y `chrome://flags/#prompt-api-for-gemini-nano-multimodal-input`, y en algunos casos un origin trial token. Google tiene [varios demos](https://developer.chrome.com/docs/ai/prompt-api#demos) que puedes probar: un playground interactivo, un demo de audio con el micrófono, y otro que procesa imágenes de un canvas.
+
+Si quieres usarlo desde una extensión de Chrome, la API expone métodos adicionales como `LanguageModel.params()` para consultar los valores por defecto de temperatura y topK:
+
+```javascript
+const params = await LanguageModel.params();
+// { defaultTopK: 3, maxTopK: 128, defaultTemperature: 1, maxTemperature: 2 }
+```
+
+## Mi veredicto
+
+La Prompt API no va a revolucionar la web mañana. Pero es el primer paso hacia un modelo donde la IA es un recurso del navegador, igual que lo son el almacenamiento local, las service workers o la geolocalización. Es una API bien diseñada —crédito al equipo que la ha liderado— que prioriza la privacidad del usuario y la facilidad de uso para el desarrollador.
+
+Para proyectos personales, prototipos, o herramientas que necesitan IA sin depender de terceros, es un avance enorme. Si tienes Chrome Dev o Canary, pruébala. Vale la pena.
+
+---
+
+*Este artículo está basado en la documentación oficial de la [Prompt API en Chrome for Developers](https://developer.chrome.com/docs/ai/prompt-api) (actualizada septiembre 2025).*
