@@ -1,0 +1,146 @@
+---
+title: "Ghostty deja GitHub: Mitchell Hashimoto tras 18 años"
+date: "2026-04-28T23:50"
+slug: "ghostty-abandona-github-18-anos"
+tags: ["ghostty", "github", "zig", "open-source", "terminales"]
+excerpt: "Ghostty, el terminal de 52K estrellas escrito en Zig, abandona GitHub. Mitchell Hashimoto, usuario #1299, se va tras 18 años de caídas diarias."
+---
+
+Hoy Mitchell Hashimoto ha publicado algo que parece una carta de desamor. O más bien, de divorcio. Ghostty, su terminal emulador de 52.000 estrellas en GitHub, se va de la plataforma. Y no es un movimiento a la ligera: Hashimoto es el usuario número 1299 de GitHub. Se registró en febrero de 2008. Lleva 18 años entrando cada día. "Cada día, varias veces al día, durante más de 18 años. Más de la mitad de mi vida."
+
+La pieza que ha publicado en su blog personal es un texto que mezcla nostalgia, frustración y una tristeza genuina. No es un anuncio corporativo. Es alguien a quien se le ha roto algo.
+
+## Una relación de 18 años
+
+Hashimoto no es un desarrollador cualquiera enfadado con una plataforma. Este tío empezó Vagrant (su primer proyecto open source exitoso) en parte porque soñaba con que GitHub le contratase. Lo dijo públicamente con 20 años: "a lo mejor GitHub me contrata si es bueno". No pasó, pero su relación con la plataforma nunca decayó.
+
+"En mi luna de miel, mientras mi mujer aún dormía, estaba en GitHub", escribe. "Algunos hacen doom scrolling en redes sociales. Yo llevo haciendo doom scrolling de GitHub issues desde antes de que existiera esa palabra."
+
+No es postureo. Es uno de los nuestros. Y ahora dice basta.
+
+## Por qué se va
+
+La razón no es ideológica. No es un manifiesto contra Microsoft ni una declaración de principios sobre el software libre. Es pragmático: GitHub se cae demasiado.
+
+Hashimoto ha llevado un diario durante el último mes. Cada día que una caída de GitHub le impedía trabajar, ponía una X. Casi todos los días tienen una X. El día que escribió el post, llevaba dos horas sin poder revisar PRs por una caída de GitHub Actions. Y esto no incluye la gran caída de Elasticsearch del 27 de abril de 2026 — el post estaba escrito una semana antes.
+
+"Esto ya no es un sitio para trabajo serio si te bloquea durante horas cada día", sentencia. Y lleva razón. Cuando tu pipeline de CI/CD depende de Actions, tus issues viven en GitHub Issues y tus PRs en GitHub PRs, una caída de dos horas no es una molestia: es un parón total.
+
+Y sí, Git es descentralizado. Pero como el propio Hashimoto señala: el problema no es Git, es toda la infraestructura alrededor. Issues, PRs, Actions. La parte que no puedes replicar con un `git remote add`.
+
+## Qué es Ghostty, para quien no lo conozca
+
+Ghostty es un emulador de terminal que llegó en 2022 con una propuesta clara: no me hagas elegir entre rápido, nativo o con features. Las tres cosas. Está escrito en **Zig** y tiene 52K estrellas en GitHub, lo cual es una barbaridad para un proyecto en un lenguaje que todavía es de nicho.
+
+Lo interesante técnicamente:
+
+- **Renderizado por GPU**: Metal en macOS, OpenGL en Linux. Nada de emulación por software.
+- **Arquitectura multihilo**: un hilo dedicado de lectura, otro de escritura y otro de renderizado _por terminal_. Si abres tres pestañas, tienes nueve hilos trabajando.
+- **Parser de terminal optimizado con SIMD**: usa instrucciones específicas de CPU para procesar secuencias de escape a velocidades absurdas.
+- **App nativa de verdad**: SwiftUI en macOS, GTK en Linux. Nada de Electron, nada de `border: none` para simular que es nativo.
+- **`libghostty`**: una biblioteca C y Zig para embeber un terminal en cualquier aplicación. Cero dependencias. Ya se está usando en producción.
+
+En benchmarks se mueve en el mismo rango que Alacritty (unos pocos puntos porcentuales de diferencia), pero con muchas más features: pestañas, splits, protocolo de gráficos de Kitty, secuencias de portapapeles, renderizado sincronizado, notificaciones de modo claro/oscuro...
+
+## Cómo se usa libghostty
+
+Una de las cosas que diferencia a Ghostty de otros terminales rápidos es que su núcleo es una biblioteca reutilizable. No es solo una app: es un _toolkit_ para quien quiera embeber un terminal en su propio software.
+
+`libghostty` no es una sola biblioteca monolítica: está dividida en componentes. El más estable ahora mismo es `libghostty-vt`, que maneja el _parsing_ de secuencias de escape y el mantenimiento del estado del terminal. Viene con bindings para C y Zig, y compila para macOS, Linux, Windows y WebAssembly.
+
+Aquí va un ejemplo usando `libghostty-vt` desde C para parsear secuencias OSC (Operating System Command), que son las que usan los terminales para cosas como cambiar el título de la ventana:
+
+```c
+#include <ghostty/vt.h>
+#include <stdio.h>
+#include <string.h>
+
+int main(void) {
+    GhosttyOscParser parser;
+    if (ghostty_osc_new(NULL, &parser) != GHOSTTY_SUCCESS) {
+        return 1;
+    }
+
+    // Construir una secuencia OSC para cambiar el título: "\x1b]0;mi proyecto\x07"
+    ghostty_osc_next(parser, '0'); // código 0 = cambiar título + nombre de icono
+    ghostty_osc_next(parser, ';');
+    const char *title = "mi proyecto";
+    for (size_t i = 0; i < strlen(title); i++) {
+        ghostty_osc_next(parser, title[i]);
+    }
+
+    GhosttyOscCommand cmd = ghostty_osc_end(parser, 0);
+
+    // Intentar extraer el título — ghostty_osc_command_data devuelve
+    // true si el comando contiene ese tipo de dato
+    const char *extracted_title = NULL;
+    if (ghostty_osc_command_data(
+            cmd,
+            GHOSTTY_OSC_DATA_CHANGE_WINDOW_TITLE_STR,
+            &extracted_title)) {
+        printf("Nuevo título: %s\n", extracted_title);
+    } else {
+        printf("El comando no contenía un título de ventana\n");
+    }
+
+    ghostty_osc_free(parser);
+    return 0;
+}
+```
+
+Fijaos en una cosa: la API no asume nada sobre el _backend_ de renderizado. `libghostty-vt` solo mantiene el estado del terminal y parsea secuencias. Cómo dibujes las celdas es cosa tuya. Puedes usar OpenGL, Metal, un `<canvas>`, o imprimir a una impresora térmica. Esa separación es justo lo que hace que la biblioteca sea usable desde WebAssembly sin arrastrar dependencias de sistema.
+
+El renderizado funciona con un sistema de "dirty tracking" a dos niveles: global (todo limpio, parcialmente sucio, todo sucio) y por fila. Después de un `ghostty_render_state_update`, el render state te dice qué filas cambiaron y solo redibujas esas. Las celdas se obtienen con un iterador que expone codepoint, color de foreground, fondo y atributos por cada celda. Nada de repintar 80×24 celdas cada frame si solo cambió una línea.
+
+La gracia está en que esta arquitectura ya está probada en combate: es literalmente el mismo código que corre en la app de escritorio de Ghostty, solo que empaquetado como biblioteca.
+
+## Configuración de Ghostty: la parte que no ves
+
+Una de las cosas que más me gustan de Ghostty es cómo maneja la configuración. No tiene un GUI de settings con mil checkboxes (aunque la app de macOS sí tiene un panel básico). La configuración va en un archivo de texto, y el formato es deliberadamente simple:
+
+```ini
+# ~/.config/ghostty/config
+font-family = "JetBrains Mono"
+font-size = 14
+theme = "catppuccin-mocha"
+background-opacity = 0.92
+
+# Cada pestaña recibe un nombre automático basado en el
+# directorio de trabajo o el proceso en ejecución
+window-title = "ghostty"
+
+# Confirmar antes de cerrar si hay procesos en ejecución
+confirm-close-surface = true
+
+# Usar el clipboard del sistema, no el buffer primario de X11
+# (esto evita el clásico "por qué no se pega" en Linux)
+clipboard-read = "system"
+clipboard-write = "system"
+
+# Shell personalizado con opciones
+command = "/bin/zsh -l"
+```
+
+Lo bueno de este enfoque es que los dotfiles son portables. Metes esto en tu repo de dotfiles y Ghostty se configura exactamente igual en tu Mac del trabajo, tu portátil Linux y el servidor headless donde lo uses como `libghostty`.
+
+## ¿A dónde se va Ghostty?
+
+Hashimoto no lo ha dicho aún. Está en conversaciones con "múltiples proveedores, tanto comerciales como FOSS". Planea una migración incremental y mantendrá un mirror de solo lectura en la URL actual de GitHub.
+
+Las opciones realistas:
+- **GitLab**: la alternativa obvia. CI/CD integrado, issues, PRs (llamadas merge requests). Pero también ha tenido sus caídas.
+- **Codeberg**: forge basado en Forgejo, completamente open source, alojado en la UE. Más pequeño pero más alineado con los principios FOSS.
+- **SourceHut**: minimalista, basado en email, sin JavaScript. Muy del estilo UNIX. Pero probablemente demasiado espartano para un proyecto de 52K estrellas.
+- **Autoalojado con Forgejo**: Ghostty corre su propia instancia. Control total, pero también carga operativa total.
+
+Mi apuesta personal: GitLab o una instancia propia de Forgejo. SourceHut es demasiado nicho para la escala de Ghostty, y Codeberg probablemente no está dimensionado para absorber un proyecto de este tamaño de golpe.
+
+## Mi veredicto
+
+Esto es más grande de lo que parece. No es solo un proyecto que cambia de forja. Es Mitchell Hashimoto. El tío que cofundó HashiCorp — Vagrant, Terraform, Vault, Consul, Nomad. Su currículum en open source es absurdo. Si él dice que GitHub ya no es un sitio para trabajo serio, la industria debería escuchar.
+
+Y el problema de fondo es real. GitHub ha tenido un 2025-2026 complicado en cuanto a fiabilidad. Actions se cae. Los PRs tardan en cargar. Las notifications van con retraso. Cuando tu producto es la fábrica donde se construye la mayor parte del software del mundo, las caídas diarias no son aceptables. Microsoft tiene los recursos para arreglarlo. La pregunta es si tiene la voluntad.
+
+Lo que más me ha llegado del post de Hashimoto no es la crítica técnica. Es el tono. Está triste. De verdad. Es alguien que ha amado un producto durante 18 años y siente que ese producto le ha dado la espalda. No es un "me voy a Mastodon porque Elon Musk es tóxico". Es "me voy de casa porque ya no puedo vivir aquí".
+
+Ghostty seguirá funcionando. El código no desaparece. Pero el mensaje es claro: la paciencia con GitHub se está agotando, y no solo entre los usuarios pequeños. También entre los gigantes.
