@@ -1,0 +1,123 @@
+---
+title: "Copilot Code Review empezará a facturar minutos de Actions: lo que necesitas saber"
+date: "2026-04-28T17:00"
+tags: ["github", "copilot", "ci-cd", "actions", "costes"]
+excerpt: "A partir del 1 de junio de 2026, cada code review de Copilot consumirá minutos de GitHub Actions en repos privados. Te cuento qué cambia, cómo afecta a tu factura y qué puedes hacer para prepararte."
+---
+
+## El anuncio
+
+El 27 de abril de 2026, GitHub publicó [un changelog](https://github.blog/changelog/2026-04-27-github-copilot-code-review-will-start-consuming-github-actions-minutes-on-june-1-2026/) que va a hacer saltar unas cuantas alarmas en equipos que usan Copilot a saco: a partir del **1 de junio de 2026**, cada code review de Copilot empezará a consumir minutos de GitHub Actions en repositorios privados.
+
+Hasta ahora, Copilot Code Review funcionaba con una arquitectura agentic que corría sobre GitHub Actions, pero el coste de esos runners lo asumía GitHub. En junio eso se acaba. A partir de ese momento, cada review factura por partida doble: **AI Credits** (el nuevo modelo de billing por uso) **más los minutos de Actions** que consuma el runner.
+
+Los repositorios públicos se libran: Actions sigue siendo gratis para ellos. Pero si tu equipo trabaja en repos privados —y la mayoría de equipos empresariales lo hacen—, esto te afecta directamente.
+
+## Cómo funcionaba hasta ahora
+
+Cuando activabas Copilot Code Review en un pull request, GitHub lanzaba un runner interno que ejecutaba un agente con acceso al contexto del repositorio. Ese agente no solo leía el diff: podía explorar archivos relacionados, entender la arquitectura del proyecto y producir feedback mucho más relevante que un linter cualquiera.
+
+La clave es que el coste computacional de ese runner era transparente para el usuario. GitHub lo metía dentro del allowance de PRUs (Premium Request Units) de Copilot y punto.
+
+## Qué cambia exactamente
+
+Desde el 1 de junio de 2026, cada code review se desglosa en dos conceptos de facturación:
+
+1. **AI Credits**: el nuevo modelo de billing unificado de Copilot. Cada review consume créditos según el plan que tengas (Pro, Pro+, Business o Enterprise).
+
+2. **Minutos de GitHub Actions**: el tiempo que el runner agentic está ejecutándose. Esto incluye tanto el tiempo de clonado del repo como el análisis del código y la generación del feedback. Se descuenta de tu cuota mensual de Actions y, si te pasas, se factura a la tarifa estándar.
+
+Lo relevante es que esto aplica incluso para reviews iniciadas por **usuarios sin licencia de Copilot** si tu organización tiene activado el _direct org billing_.
+
+## Estimando el impacto en tu factura
+
+Vamos a hacer números. GitHub no ha publicado cuántos minutos consume de media una code review, pero basándonos en la arquitectura agentic que describen, podemos intentar una estimación conservadora.
+
+Imaginemos un equipo de 20 desarrolladores que abren unos 15 PRs al día en total, con Copilot Code Review activado en todos ellos. Suponiendo que cada review consuma entre 2 y 5 minutos de runner:
+
+```python
+# Estimación conservadora de costes adicionales
+PRS_POR_DIA = 15
+DIAS_HABILES_POR_MES = 22
+MINUTOS_POR_REVIEW = 3  # estimación conservadora
+
+minutos_mensuales = PRS_POR_DIA * DIAS_HABILES_POR_MES * MINUTOS_POR_REVIEW
+# minutos_mensuales = 15 * 22 * 3 = 990 minutos
+
+# Plan Team: 3000 minutos incluidos
+# Plan Enterprise: 50000 minutos incluidos
+minutos_extra_team = max(0, minutos_mensuales - 3000)
+minutos_extra_enterprise = max(0, minutos_mensuales - 50000)
+
+# Tarifa estándar Linux: $0.008/min
+coste_extra_team = minutos_extra_team * 0.008
+coste_extra_enterprise = minutos_extra_enterprise * 0.008
+
+print(f"Minutos mensuales estimados: {minutos_mensuales}")
+print(f"Coste extra (Plan Team): ${coste_extra_team:.2f}")
+print(f"Coste extra (Plan Enterprise): ${coste_extra_enterprise:.2f}")
+```
+
+En este escenario, 990 minutos mensuales adicionales. Para un plan Team (3000 minutos incluidos), estarías comiéndote un tercio de tu allowance solo en code reviews. Si además tienes CI/CD intensivo, igual empiezas a pagar overage.
+
+Para un plan Enterprise con 50 000 minutos, 990 minutos no se notan. Pero escala esto a 100 desarrolladores y 75 PRs al día, y la cosa cambia:
+
+```python
+# Equipo más grande
+PRS_POR_DIA = 75
+minutos_mensuales = PRS_POR_DIA * DIAS_HABILES_POR_MES * MINUTOS_POR_REVIEW
+# 75 * 22 * 3 = 4950 minutos
+
+# Sumando CI normal (~2 min por push, 100 pushes/día)
+minutos_ci = 100 * 22 * 2  # 4400 minutos
+total = minutos_mensuales + minutos_ci
+# total = 9350 minutos
+
+print(f"Total mensual (reviews + CI): {total} min")
+print(f"Overage Enterprise: {max(0, total - 50000)} min")
+# 0 en Enterprise, pero en Team...
+print(f"Overage Team: {max(0, total - 3000)} min -> ${max(0, total - 3000) * 0.008:.2f}")
+```
+
+## Estrategias para no llevarte un susto
+
+### 1. Configurar budgets de Actions
+
+GitHub permite establecer límites de gasto en Actions. Si no lo has hecho ya, es el momento:
+
+```yaml
+# .github/settings.yml (si usas github-settings app)
+repository:
+  actions:
+    spending_limit: 50  # dólares
+```
+
+O directamente desde la UI: Settings → Billing → Actions → Spending limits. Con esto evitas que un pico de uso te dispare la factura sin avisar.
+
+### 2. Revisar qué repos activan Code Review
+
+Copilot Code Review se puede configurar por repositorio. Si tienes repos de baja criticidad donde un review automático no aporta tanto como en el core del producto, considera desactivarlo ahí. La configuración está en la pestaña de Settings del repo, dentro de Code review (Copilot).
+
+### 3. Monitorear el consumo
+
+GitHub ofrece dashboards tanto para Actions como para Copilot. El de Copilot Usage Metrics te muestra cuántas reviews se están ejecutando y cuánto crédito consumen. Cruza eso con el de Actions para ver el impacto real en minutos.
+
+GitHub expone la telemetría de Actions y Copilot a través de sus APIs de billing. Puedes consultar el consumo agregado con un endpoint como `GET /orgs/{org}/settings/billing/actions`, aunque la granularidad por repositorio varía según el plan. Para la mayoría de equipos, los dashboards integrados en la UI de Settings → Billing son más que suficientes para detectar tendencias.
+
+### 4. Considerar self-hosted runners
+
+Si tu consumo de Actions es alto, los runners self-hosted pueden salir más baratos que pagar overage. GitHub Copilot Code Review soporta self-hosted runners, así que podrías mover las reviews a tu propia infraestructura.
+
+## Mi veredicto
+
+Esto era inevitable. GitHub ha estado regalando el coste de computación de Copilot Code Review desde que lanzaron la arquitectura agentic, y era cuestión de tiempo que empezaran a facturarlo. La pregunta no era _si_ iba a pasar, sino _cuándo_.
+
+Lo que me chirría un poco es el doble billing: AI Credits **y** Actions minutos por el mismo servicio. Es como si te cobraran el café y aparte el uso de la taza. Entiendo que los AI Credits cubren el coste del modelo y los Actions minutos el de la infraestructura que lo ejecuta, pero como usuario la experiencia es que estás pagando dos veces por lo mismo.
+
+Dicho esto, el impacto real para la mayoría de equipos va a ser modesto. Si estás en un plan Team con 3000 minutos, probablemente notes el pico. Si estás en Enterprise con 50 000 minutos, seguramente te dé igual a menos que tengas cientos de devs. Y si trabajas solo con repos públicos, puedes ignorar este artículo completamente.
+
+La jugada inteligente es anticiparse: pon budgets, revisa tu consumo actual, y si tu equipo hace code review a saco, empieza a monitorizar cuántas reviews se disparan al mes. Tienes hasta junio para prepararte.
+
+---
+
+¿Mi recomendación? Si tu flujo de trabajo depende mucho de Copilot Code Review, el valor que aporta probablemente justifica el coste extra. Pero si lo tienes activado "porque sí" en repos donde nunca miras el feedback, igual es momento de hacer limpieza.
