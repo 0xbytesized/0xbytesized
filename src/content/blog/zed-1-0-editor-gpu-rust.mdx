@@ -1,0 +1,118 @@
+---
+title: "Zed 1.0: el editor GPU-native que desafía a VS Code"
+date: "2026-04-29T18:00"
+tags: ["zed", "rust", "editor", "gpu", "open-source"]
+excerpt: "Zed llega a 1.0 tras cinco años de desarrollo. Construido desde cero en Rust con su propio framework GPU, GPUI. Con agentes de IA nativos y un protocolo abierto. ¿Merece la pena?"
+---
+
+Hoy es un día importante para el ecosistema de editores de código. Zed, el editor que Nathan Sobo y su equipo llevan construyendo desde que dejaron Atom atrás, acaba de anunciar su versión 1.0. Y lo hace con más de 80.000 estrellas en GitHub, más de un millón de líneas de código y una filosofía que se aparta radicalmente de todo lo que conocemos.
+
+He estado siguiendo Zed desde sus primeras betas, y si soy sincero, siempre me ha parecido un proyecto con una ambición casi temeraria. Reescribir un editor de código desde cero en Rust, inventar tu propio framework de UI acelerado por GPU, y competir contra VS Code —que tiene el respaldo de Microsoft y un ecosistema de extensiones imposible de igualar— suena a suicidio comercial. Pero aquí estamos: Zed 1.0 es real, se descarga gratis, y cientos de miles de desarrolladores ya lo usan a diario.
+
+## De Atom a Electron, de Electron a la GPU
+
+Hay que entender de dónde viene esto. Nathan Sobo fue el creador de Atom en GitHub. Atom se construyó como un fork de Chromium, y en el proceso nació Electron, el framework que hoy impulsa VS Code, Slack, Discord y —como bromea el propio anuncio de Zed— "un nuevo editor de IA cada dos semanas".
+
+El problema que Sobo identificó es que Electron impone un techo. Por mucho que optimices, tu editor siempre será tan bueno como el navegador que lo ejecuta. La latencia de teclado, el renderizado de fuentes, el scroll, el consumo de memoria... todo está mediado por capas que no controlas.
+
+La decisión fue drástica: en lugar de construir Zed como una página web, lo construyeron como un videojuego. Toda la aplicación se organiza alrededor de alimentar datos a shaders que se ejecutan en la GPU.
+
+Para lograrlo, crearon GPUI, un framework de UI propio escrito en Rust que combina modo inmediato y modo retenido con aceleración por GPU. GPUI es open source, y aunque el framework en sí sigue siendo pre-1.0, ya es usable para construir aplicaciones fuera de Zed.
+
+Un "hola mundo" en GPUI se ve más o menos así:
+
+```rust
+use gpui::*;
+
+struct HelloWorld;
+
+impl Render for HelloWorld {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .flex()
+            .bg(rgb(0x282c33))
+            .size_full()
+            .justify_center()
+            .items_center()
+            .child("¡Zed 1.0 está aquí!")
+    }
+}
+
+fn main() {
+    Application::new().run(|cx: &mut App| {
+        cx.open_window(
+            WindowOptions::default(),
+            |_window, cx| cx.new(|_cx| HelloWorld),
+        );
+    });
+}
+```
+
+Lo interesante de GPUI es que no tienes un DOM virtual ni un ciclo de diffing al estilo React. Los elementos se construyen en cada frame, pero GPUI cachea agresivamente a nivel de GPU. La API de styling recuerda a Tailwind —encadenas métodos como `.flex()`, `.bg()`, `.text_color()`— pero todo se resuelve en tiempo de compilación, sin runtime de CSS.
+
+## Lo que trae Zed 1.0
+
+La versión 1.0 no es solo un número. El equipo dice que han alcanzado un "punto de inflexión" donde la mayoría de desarrolladores pueden sentirse cómodos en Zed rápidamente. Algunas cosas que vienen en esta release:
+
+- **Soporte para macOS, Windows y Linux.** Ya no es un editor solo para Mac.
+- **Git integrado, SSH remoto, debugger.** Las features que esperas de un editor moderno.
+- **Extensiones.** El ecosistema es pequeño comparado con VS Code, pero crece.
+- **Rainbow brackets.** Porque sí, importan.
+
+Pero lo que de verdad diferencia a Zed es su integración nativa con IA. No es un plugin, no es una sidebar con un chat pegado. Zed es un editor AI-native desde los cimientos.
+
+## Agentes, predicciones y el Agent Client Protocol
+
+Zed permite ejecutar múltiples agentes de IA en paralelo dentro del editor. Las predicciones de edición (edit predictions) te sugieren el siguiente cambio a nivel de tecla —no de token, sino exactamente la edición que probablemente harías— con la misma latencia que el resto del editor.
+
+El Agent Client Protocol (ACP) es quizás lo más estratégico de este lanzamiento. Es un protocolo abierto que permite que distintos agentes de IA se conecten a Zed: Claude Agent, Codex, OpenCode, y recientemente también Cursor. Zed no te obliga a usar su agente; te da el lienzo y deja que elijas.
+
+Configurar un agente en Zed es razonablemente directo. En tu `settings.json`:
+
+```json
+{
+  "agent": {
+    "enabled": true,
+    "default_model": "claude-sonnet-4-5",
+    "models": [
+      {
+        "name": "claude-sonnet-4-5",
+        "provider": "anthropic",
+        "max_tokens": 8192
+      }
+    ]
+  },
+  "edit_predictions": {
+    "enabled": true,
+    "mode": "inline"
+  }
+}
+```
+
+No voy a fingir que he probado todos los agentes compatibles, pero la arquitectura es sólida: el protocolo define cómo un agente externo solicita leer archivos, proponer diffs, y recibir feedback del usuario sin acoplarse a la UI de Zed. Es el tipo de diseño que permite que el ecosistema crezca sin que el editor haga de cuello de botella.
+
+## DeltaDB: lo que viene
+
+El anuncio también adelanta DeltaDB, un motor de sincronización basado en CRDTs que trackea cada cambio con granularidad de carácter. La idea es que múltiples humanos y agentes compartan una vista consistente del código mientras evoluciona.
+
+Si esto suena familiar, es porque recuerda a lo que Google Docs hace con texto plano, pero aplicado a código con agentes de IA metidos en medio. DeltaDB permitiría invitar a compañeros a conversaciones con agentes, revisar y evolucionar código generado por IA directamente en el contexto donde se generó. El equipo dice que esto requiere "propiedad profunda de las primitivas fundamentales", y que no sería posible dentro del motor de renderizado de otro navegador. Tiene sentido.
+
+## Zed for Business
+
+Zed también lanza Zed for Business: facturación centralizada, control de acceso basado en roles, y gestión de equipos. Es un movimiento obvio para monetizar, y necesario si quieren ser sostenibles. El pricing no lo han detallado públicamente aún, pero el editor base sigue siendo gratuito y open source.
+
+## Mi opinión
+
+He probado muchos editores. Empecé con Notepad++, pasé por Sublime Text, viví en VS Code durante años, y jugué con Neovim lo suficiente como para respetarlo pero no adoptarlo. Zed es el primer editor en mucho tiempo que me hace plantearme cambiar.
+
+La velocidad es el argumento principal, y no es marketing. Zed arranca instantáneamente, el scroll va a 120 fps sin tearing, y la latencia de teclado es imperceptible. Cuando pasas ocho horas al día en un editor, esos milisegundos importan más de lo que la gente cree.
+
+Dicho esto, el ecosistema de extensiones sigue siendo la gran barrera. VS Code tiene más de 50.000 extensiones. Zed tiene unas pocas docenas hechas por la comunidad. Si tu flujo de trabajo depende de extensiones muy específicas —y el mío depende de varias—, cambiar de editor es un coste real.
+
+Lo de los agentes de IA me parece el movimiento correcto en el momento correcto. Todos los editores están metiendo IA a martillazos, pero Zed la diseñó como parte del núcleo desde el día uno. El Agent Client Protocol es un gol en propia puerta de VS Code: en lugar de encerrarte en Copilot, Zed te deja elegir. En 2026, eso es una declaración de principios.
+
+Si no has probado Zed o lo probaste hace un año y te fuiste porque le faltaba algo, la 1.0 es la excusa perfecta para darle otra oportunidad. No es perfecto, y el equipo lo admite. Pero es el intento más serio que he visto de construir un editor que trate a la GPU como ciudadana de primera clase, y eso merece respeto.
+
+---
+
+¿Lo has probado? Me interesa saber si alguien ha migrado de VS Code a Zed para trabajo diario y qué tal la experiencia con el ecosistema de extensiones.
