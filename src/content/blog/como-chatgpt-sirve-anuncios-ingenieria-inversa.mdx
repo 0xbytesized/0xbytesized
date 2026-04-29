@@ -1,0 +1,135 @@
+---
+title: "Así sirve ChatGPT anuncios: ingeniería inversa del circuito completo de atribución"
+date: "2026-04-29T12:00"
+tags: ["chatgpt", "ingeniería-inversa", "publicidad", "sse", "tracking"]
+excerpt: "Buchodi ha capturado el tráfico real de anuncios de ChatGPT: objetos JSON en el stream SSE, cuatro tokens Fernet por anuncio y un SDK de tracking llamado OAIQ. El desglose completo."
+---
+
+Hace unos días me topé con un artículo en Hacker News que me dejó pegado a la pantalla. Buchodi, un investigador de seguridad que analiza tráfico de red desde una flota de dispositivos móviles, publicó un desglose técnico de cómo OpenAI sirve anuncios dentro de ChatGPT. No es especulación: es tráfico capturado, parseado y explicado.
+
+Llevamos meses escuchando que "ChatGPT va a meter anuncios", pero hasta ahora nadie había mostrado exactamente cómo funcionan por dentro. Buchodi lo ha hecho. Y es más interesante —y más inquietante— de lo que esperaba.
+
+## El anuncio viaja en el stream de la respuesta
+
+Cuando escribes un mensaje en ChatGPT, el frontend abre una conexión SSE (Server-Sent Events) contra `chatgpt.com/backend-api/f/conversation`. La mayoría de los eventos en ese stream son tokens del modelo —palabras que van apareciendo una a una—. Pero de vez en cuando, el backend cuela algo distinto:
+
+```json
+event: delta
+data: {
+  "type": "single_advertiser_ad_unit",
+  "ads_request_id": "069e89b3-c038-7764-8000-6e5a193e5f69",
+  "advertiser_brand": {
+    "name": "Grubhub",
+    "id": "adacct_6984ed0ba55481a29894bb192f7773b4",
+    "favicon_url": "https://bzrcdn.openai.com/cabfae7ead26b03d.png"
+  },
+  "carousel_cards": [{
+    "title": "Get Chinese Food Delivered",
+    "body": "Satisfy Your Cravings with Grubhub Delivery.",
+    "target": {
+      "type": "url",
+      "value": "https://www.grubhub.com/?utm_source=chatgptpilot&...&oppref=gAAAA<...>&olref=gAAAA<...>",
+      "open_externally": false
+    }
+  }]
+}
+```
+
+Tres detalles que me llamaron la atención:
+
+- El tipo se llama `single_advertiser_ad_unit`, lo que sugiere que existe un hermano "multi-advertiser" todavía no visto en producción.
+- El ID del anunciante sigue el patrón `adacct_` + 32 caracteres hexadecimales. Un identificador estable por merchant, no por campaña.
+- Las imágenes del anuncio y el favicon se sirven desde `bzrcdn.openai.com`. OpenAI aloja las creatividades publicitarias, no el anunciante. Eso significa que OpenAI ve todas las impresiones.
+
+## Cómo se selecciona el anuncio: targeting contextual
+
+Buchodi usó una misma cuenta para seis conversaciones con temas radicalmente distintos. El resultado fue quirúrgico:
+
+| Tema de la conversación | Anuncio servido |
+|---|---|
+| Viaje a Pekín (Muralla China, Ciudad Prohibida) | Grubhub — "Get Chinese Food Delivered" |
+| Reservas de tours en Pekín | GetYourGuide — tour a la Gran Muralla |
+| Vuelos a Pekín | Axel — búsqueda de vuelos |
+| Playoffs de la NBA | Gametime — entradas NBA |
+| Moda de primavera | Aritzia — ropa y tendencias |
+| Productividad / diapositivas | Canva — diseño de slides |
+
+Misma cuenta, distinto tema, distinto anunciante. El targeting es puramente contextual: el modelo o un sistema paralelo extrae entidades de tu mensaje y las cruza con una bolsa de anunciantes. No se encontró evidencia de que use el historial completo de conversación... pero tampoco de que no lo haga.
+
+Esto me parece relevante porque no es el modelo el que "decide" mostrarte un anuncio. Es una capa de infraestructura publicitaria clásica (puja, segmentación, atribución) acoplada al stream de inferencia.
+
+## Los cuatro tokens: la cadena de atribución al detalle
+
+Cada anuncio lleva cuatro blobs cifrados con [Fernet](https://github.com/fernet/spec) (AES-128-CBC + HMAC-SHA256, claves solo en servidores de OpenAI). Esto es ingeniería publicitaria de manual, pero aplicada a un chat de IA:
+
+1. **`ads_spam_integrity_payload`**: viaja dentro del evento SSE, nunca en la URL de clic. Es una firma anti-fraude que OpenAI valida en sus servidores cuando procesa el clic.
+
+2. **`oppref`** (OpenAI Preference/Referral): va en la URL de destino y el SDK OAIQ lo copia a una cookie `__oppref` con TTL de 720 horas (30 días). Es el token de atribución *forward*: viaja con cada evento de píxel posterior.
+
+3. **`olref`** (OpenAI Link Reference): va junto a `oppref` en la URL pero el SDK observado no lo almacena. Probablemente se registra en los servidores de OpenAI en el momento del clic, del lado *impression*.
+
+4. **`ad_data_token`**: un JSON en base64 que contiene otro token Fernet. Viaja en el payload SSE y se reconcilia en servidor cuando se produce el clic.
+
+Lo brillante de Fernet es que sus primeros 9 bytes son públicos: un byte de versión (`0x80`) y un timestamp Unix de 8 bytes en big-endian. Así que cualquiera puede extraer cuándo se generó un token sin necesidad de la clave:
+
+```python
+import base64, struct
+from datetime import datetime, timezone
+
+# Los primeros 9 bytes de un token Fernet son públicos
+token = "gAAAAABp7fdA" + "=="
+raw = base64.urlsafe_b64decode(token)
+ts = struct.unpack(">Q", raw[1:9])[0]
+print(datetime.fromtimestamp(ts, tz=timezone.utc))
+# → 2026-04-26 11:30:08 UTC
+```
+
+Buchodi capturó un clic de Home Depot generado a las 11:30:08. El navegador cargó la página del merchant a las 11:31:43. **95 segundos de latencia** entre que OpenAI generó el token y el usuario hizo clic. No es exactamente "tiempo real", pero para un chat donde estás leyendo la respuesta antes de decidir si pinchar, tiene sentido.
+
+## El SDK OAIQ: cómo se cierra el bucle en el lado del comercio
+
+Cuando tocas la tarjeta del anuncio, el navegador abre algo como:
+
+```
+https://www.grubhub.com/?utm_source=chatgptpilot
+                       &oppref=gAAAA<...>
+                       &olref=gAAAA<...>
+```
+
+La página del comercio carga el SDK de OpenAI:
+
+```html
+<script src="https://bzrcdn.openai.com/sdk/oaiq.min.js"></script>
+<script>
+  oaiq('init', { pid: '<merchant pixel ID>' });
+  oaiq('measure', 'contents_viewed', { product_id: '123' });
+</script>
+```
+
+El SDK está en versión `0.1.3` — early stage, pero funcional. En `init`, lee `?oppref=` de la URL, lo guarda en la cookie `__oppref` (30 días), y coloca una cookie de prueba `__oaiq_domain_probe`. Cada llamada a `measure` hace un POST contra:
+
+```
+POST https://bzr.openai.com/v1/sdk/events?pid=<merchant>&st=oaiq-web&sv=0.1.3
+```
+
+Dos dominios para añadir a tu lista de bloqueo si quieres evitar el tracking: `bzrcdn.openai.com` y `bzr.openai.com`. Dos cookies que inspeccionar: `__oppref` y `__oaiq_domain_probe`.
+
+## Lo que esto significa para el ecosistema
+
+Esto no es un banner de AdSense colado en un lateral. Es un sistema de atribución publicitaria completo —impresiones, clics, conversiones— incrustado dentro del stream de inferencia del modelo. Es la fusión de dos industrias que hasta ahora operaban por separado: la publicidad programática y los modelos de lenguaje.
+
+También me parece relevante que `target.open_externally` esté a `false`: los enlaces se abren en el webview interno de ChatGPT, no en tu navegador. OpenAI observa toda la navegación post-clic además de las señales del píxel SDK. El nivel de visibilidad que tienen sobre el embudo de conversión es brutal.
+
+¿Y la privacidad? Los tokens están cifrados con Fernet, cierto. Pero el sistema deja un rastro clarísimo: cookies de 30 días en dominios de comercios, requests a `bzr.openai.com` con IDs de producto, y una correlación perfecta entre el tema de tu conversación y el anunciante servido. Si esto escala —y todo apunta a que lo hará—, ChatGPT se convierte en el intermediario publicitario mejor informado del mercado: sabe qué te preocupa, qué buscas y en qué momento exacto estás receptivo a una oferta.
+
+## Mi veredicto
+
+No me escandaliza que OpenAI meta anuncios. Era cuestión de tiempo. Lo que me impresiona es la ejecución técnica: en lugar de embeber iframes o banners, han construido un ad server que habla el mismo protocolo que el modelo —SSE, JSON tipado, tokens criptográficos—. Es elegante en su arquitectura y aterrador en sus implicaciones.
+
+Como desarrollador, me quedo con tres cosas:
+
+1. Si usas ChatGPT para decidir qué comprar, asume que OpenAI lo sabe y lo monetiza.
+2. Si trabajas en adtech, estudia este diseño: la atribución multi-token con Fernet dentro de un stream SSE es una idea brillantemente portátil a otros contextos.
+3. Si te importa la privacidad, `bzr.openai.com` y `bzrcdn.openai.com` deberían estar ya en tu bloqueador.
+
+El artículo original de Buchodi está en [buchodi.com](https://www.buchodi.com/how-chatgpt-serves-ads-heres-the-full-attribution-loop/). Vale cada minuto de lectura.
