@@ -1,0 +1,110 @@
+---
+title: "Por qué Linux no avisó del CopyFail a las distros"
+date: "2026-05-01T07:22"
+tags: ["linux", "kernel", "seguridad", "cve", "procesos-open-source"]
+excerpt: "El kernel Linux no puede avisar a las distros sobre bugs concretos. El caso CopyFail expuso las grietas de un proceso de seguridad entre leyes y realidad."
+---
+
+El 29 de abril de 2026, un investigador de seguridad publicó un exploit trivial que concedía root en cualquier máquina Linux con un kernel desde la versión 4.14 — lanzada en 2017. El bug, bautizado como CopyFail (CVE-2026-31431), permitía escalar privilegios en segundos usando una interfaz del subsistema criptográfico del kernel que apenas nadie conocía: `AF_ALG` con `authencesn`.
+
+El exploit corrió como la pólvora. En cuestión de horas, la noticia llegó a Hacker News, donde acumuló cientos de comentarios. Pero lo más inquietante no fue el bug en sí — fue descubrir que la mayoría de distribuciones Linux no tenían ni idea de que esto se avecinaba.
+
+## El parche silencioso
+
+La cronología cuenta una historia incómoda:
+
+- **11 de abril de 2026**: el kernel publica las versiones 6.18.22 y 6.19.12 con el fix incluido. En los changelogs, una línea más entre cientos: "crypto: authencesn - fix copy_to_user usage".
+- **25 de abril**: el equipo de CVEs del kernel asigna puntuación a 168 vulnerabilidades de golpe. CopyFail recibe un 7.8. Pasa completamente desapercibido.
+- **29 de abril**: el investigador publica el exploit completo. Todo el mundo corre.
+
+El problema de fondo, señalado por Sam James (desarrollador de Gentoo) en la lista [oss-security](https://www.openwall.com/lists/oss-security/2026/04/30/10), es estructural:
+
+> "For Linux kernel vulnerabilities, unless the reporter chooses to bring it to the linux-distros ML, there is no heads-up to distributions."
+
+Traducción: si quien encuentra un bug en el kernel lo reporta por el canal estándar (`security@kernel.org`), las distribuciones no reciben ningún aviso previo. El fix se mezcla entre miles de parches y cada distro tiene que encontrarlo por su cuenta.
+
+## La jaula legal de Greg KH
+
+La respuesta de Greg Kroah-Hartman, maintainer de la rama estable del kernel, fue todavía más reveladora. Cuando Alexander Peslyak (Solar Designer) le preguntó si el equipo del kernel podía notificar proactivamente a las distros sobre bugs con exploits inminentes, la respuesta fue un jarro de agua fría:
+
+> "Nope, sorry, we are NOT allowed to notify anyone about anything 'ahead of time' otherwise we will have to tell everyone about everything. That's the only policy by which all the legal/governmental agencies have agreed to allow us to operate in, so we are stuck with it."
+
+El equipo de seguridad del kernel opera bajo una restricción binaria impuesta por agencias gubernamentales: o se lo cuentan a todo el mundo, o no se lo cuentan a nadie. No existe un punto intermedio donde puedan susurrarle al oído a Red Hat, Canonical o SUSE que el parche X es más urgente que el parche Y.
+
+## Dos caminos, una desconexión
+
+Para entender el embrollo, hay que conocer los dos canales que existen:
+
+### Camino A: `security@kernel.org`
+
+El reportador envía el bug directamente al equipo de seguridad del kernel. El equipo lo analiza, desarrolla un fix, lo mezcla en el árbol principal y eventualmente lo backportea a las ramas estables. Las distros se enteran cuando el parche aparece público. Es el camino que siguió CopyFail.
+
+### Camino B: `linux-distros`
+
+Alternativamente, el reportador puede enviar el bug a la lista privada `linux-distros`, donde están suscritos los equipos de seguridad de las principales distribuciones (Red Hat, Debian, Ubuntu, SUSE, Gentoo, etc.). En este caso, las distros reciben un aviso con 14 días de antelación antes de la divulgación pública.
+
+El problema es obvio: el sistema delega en el reportador la responsabilidad de conocer y elegir el Camino B. Si el investigador no está familiarizado con el ecosistema Linux, usará `security@kernel.org` por defecto — y las distros se quedarán a oscuras.
+
+Un comentario en Hacker News lo resumió con crudeza:
+
+> "Stop blaming the reporter. Start asking kernel to fix their process. Linux kernel is no longer a toy project, it has full time employees employed by various companies."
+
+## El coste real: kernels LTS desprotegidos
+
+La falta de aviso previo tuvo consecuencias tangibles. Cuando el exploit se hizo público el 29 de abril, los kernels longterm — 6.12, 6.6, 6.1, 5.15 y 5.10 — no tenían el fix. Y no era por dejadez: el parche simplemente no aplicaba limpiamente sobre kernels tan antiguos, debido a cambios en las APIs internas del subsistema criptográfico.
+
+Sam James, de Gentoo, publicó un workaround deshabilitando el módulo `authencesn`:
+
+```bash
+# Verificar si el módulo está cargado
+lsmod | grep authencesn
+
+# Deshabilitarlo inmediatamente (requiere root)
+rmmod authencesn
+
+# Evitar que se cargue en el futuro
+echo "blacklist authencesn" > /etc/modprobe.d/block-authencesn.conf
+```
+
+Pero esta solución no servía para kernels donde `AF_ALG` estaba compilado estáticamente (sin soporte de módulos). Para esos casos, un miembro de la comunidad creó un mitigation basado en eBPF que bloquea la llamada vulnerable a nivel de syscall:
+
+```c
+// Fragmento conceptual del mitigation eBPF
+// Repo completo: github.com/Dabbleam/CVE-2026-31431-mitigation
+SEC("kprobe/af_alg_accept")
+int block_af_alg_accept(struct pt_regs *ctx) {
+    // Bloquear la creación de sockets AF_ALG
+    // cuando el tipo de algoritmo es "authencesn"
+    u32 type = PT_REGS_PARM2(ctx);
+    if (type == ALG_TYPE_AEAD) {
+        bpf_override_return(ctx, -EACCES);
+    }
+    return 0;
+}
+```
+
+Los backports oficiales no llegaron hasta el 30 de abril, un día después del incendio. Greg KH los publicó para la rama 6.12.y y anunció releases inminentes para el resto.
+
+## ¿Se puede arreglar esto?
+
+El problema tiene tres capas y ninguna tiene una solución fácil:
+
+**Capa 1 — La restricción legal**: si las agencias gubernamentales imponen la regla de "todos o nadie", el kernel no puede hacer otra cosa. Pero la pregunta que flota en el aire es: ¿qué agencias y bajo qué marco legal? La opacidad de esta restricción es, en sí misma, parte del problema.
+
+**Capa 2 — El volumen de CVEs**: 168 CVEs puntuados en un solo día. Aunque las distros recibieran notificación de todos, no tendrían capacidad para priorizar. El problema no es solo de comunicación, es de señal/ruido.
+
+**Capa 3 — La responsabilidad difusa**: ¿debería el reportador saber que existe `linux-distros`? ¿Debería `security@kernel.org` redirigir bugs con exploit trivial a esa lista? ¿Deberían las distros tener herramientas automáticas para detectar parches "interesantes" entre el ruido?
+
+## Mi opinión
+
+Llevo cubriendo vulnerabilidades del kernel durante meses en este blog, y el patrón es siempre el mismo: el proceso técnico de corrección funciona impecablemente, pero el proceso social de comunicación es un desastre. El kernel corrigió CopyFail en abril. Lo hizo bien, rápido y con backports. Sin embargo, la información no fluyó hacia quienes operan la infraestructura real.
+
+La restricción de "todos o nadie" suena a solución legal de mínimo común denominador — probablemente diseñada para evitar acusaciones de tráfico de información privilegiada o de favorecer a unas empresas sobre otras. Es comprensible, pero el resultado neto es que todo el mundo pierde.
+
+Hay algo que el ecosistema podría hacer mañana mismo sin cambiar ni una ley: que `security@kernel.org` responda automáticamente a cada reporte con un mensaje estándar que diga: "Si tu bug es explotable de forma trivial, considera enviarlo también a `linux-distros` para que las distribuciones tengan tiempo de reacción". Un simple `auto-reply` resolvería el 80% del problema.
+
+Mientras tanto, si gestionas servidores Linux en producción, mi consejo es simple: no esperes a que tu distro te avise. Suscríbete a `oss-security`, mira los commits que huelen a seguridad en las releases estables del kernel, y sobre todo — actualiza el kernel con frecuencia. Porque CopyFail no va a ser el último.
+
+---
+
+**Fuente original**: [oss-security - Re: CVE-2026-31431: CopyFail](https://www.openwall.com/lists/oss-security/2026/04/30/10), Hacker News (459 puntos, 346 comentarios).
