@@ -48,7 +48,7 @@ class AnacronismoDetector:
                 self.ngrams_pre[ngram] += 1
 
     def probable_anacronismo(self, documento: str, umbral: float = 0.15) -> bool:
-        """Devuelve True si el documento contiene太多 n-gramas modernos."""
+        """Devuelve True si el documento contiene demasiados n-gramas modernos."""
         tokens = re.findall(r'\w+', documento.lower())
         ngramas_modernos = 0
         total = 0
@@ -157,8 +157,8 @@ Los autores construyeron una pipeline desde cero:
 
 1. **Generaron pares instrucción-respuesta** a partir de textos históricos con estructura regular: manuales de etiqueta, guías de correspondencia, libros de cocina, diccionarios y enciclopedias.
 2. **Sintetizaron prompts** para distintos tipos de tarea: resumir documentos, responder preguntas factuales, mantener conversaciones.
-3. **Aplicaron DPO online** usando Claude Sonnet 4.6 como juez — la puntuación media de seguimiento de instrucciones subió de 2.0 a 3.4 sobre 5.
-4. **Refinaron con RL** usando chats sintéticos entre Claude Opus 4.6 y Talkie.
+3. **Aplicaron DPO online** usando un modelo Claude Sonnet como juez — la puntuación media de seguimiento de instrucciones subió de 2.0 a 3.4 sobre 5.
+4. **Refinaron con RL** usando chats sintéticos entre un modelo Claude Opus y Talkie.
 
 El resultado es un modelo que **suena a persona de 1930** pero puede mantener una conversación coherente. Aunque los autores admiten que el RL con feedback de IA moderna inevitablemente moldea su comportamiento de forma anacrónica. (La versión de 7B, tras RL, hablaba en listados numerados.)
 
