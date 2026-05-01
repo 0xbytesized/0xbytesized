@@ -1,0 +1,115 @@
+---
+title: "Adobe 1991: así resucita PostScript en tu navegador"
+date: "2026-05-01T19:00"
+tags:
+  - postscript
+  - emulación
+  - webassembly
+  - retrocomputing
+  - rust
+excerpt: "El intérprete PostScript original de Adobe, congelado en un cartucho de 1991, ahora corre en el navegador sin servidor. Así funciona la magia."
+---
+
+A veces la arqueología digital te da sorpresas. Esta semana me topé con una historia que me dejó con la boca abierta: alguien ha cogido el intérprete PostScript **original de Adobe**, atrapado en un cartucho de impresora de 1991, lo ha emulado y lo ha metido en un navegador web. Sin servidor. Sin dependencias. Solo WebAssembly y un ROM de 2 MB.
+
+El autor es Michael Steil, conocido por [pagetable.com](https://www.pagetable.com/), un sitio que llevo años leyendo cuando necesito recordar que la ingeniería de verdad no caduca. Su proyecto [retro-ps](https://github.com/mist64/retro-ps) coge el cartucho HP C2089A "PostScript Cartridge Plus", emula el Motorola 68000 que llevaba dentro y ejecuta el intérprete tal cual, 35 años después, con resultados impecables.
+
+## El cartucho que se negó a morir
+
+En 1991, HP vendía la LaserJet III. Para añadir soporte PostScript —el lenguaje que Adobe creó para describir páginas impresas con precisión matemática— se compraba un cartucho aparte: el C2089A.
+
+Dentro de ese plástico iba un chip ROM de 2 MB con el intérprete PostScript Level 2 **de Adobe**, versión 2010.118, junto con las fuentes tipográficas, los algoritmos de _halftone_ y todo el sistema de _banding_ para generar la salida. El cartucho se enchufaba y la CPU principal de la impresora —un modesto Motorola 68000 a 8 MHz con entre 1 y 4 MB de RAM— ejecutaba el código directamente desde esa ROM.
+
+Lo brutal es que Adobe no ha cambiado PostScript. El lenguaje que describieron en los 80 es el mismo que usamos hoy. Ese ROM de 1991 sigue siendo un intérprete perfectamente válido.
+
+## Cómo funciona retro-ps
+
+Steil ha hecho varias cosas a la vez, todas delicadas:
+
+**Emulación de CPU.** El intérprete está compilado para M68K. retro-ps mete un emulador de 68020 (una versión superior del 68000 original) con 16 MB de RAM accesible. Mucho más de lo que la LaserJet III jamás tuvo.
+
+**Hardware fantasma.** El cartucho esperaba hablar con la placa base de la impresora: registros de estado, interrupciones del motor de impresión, _soft-traps_. El emulador finge todo eso. Genera las respuestas que el código del cartucho espera y simula las interrupciones para que la máquina de estados avance.
+
+**Sin restricciones de impresora.** La LaserJet III imprimía a 300 DPI, con márgenes fijos de un cuarto de pulgada y tamaños de papel predefinidos. El intérprete Adobe no tiene esas limitaciones —eran de la impresora, no del lenguaje. retro-ps las elimina: cualquier DPI (hasta unos 1450 en carta), cualquier tamaño de papel, cualquier frecuencia de _halftone_, sin márgenes.
+
+**Compilado a WASM.** Todo esto corre en Rust, compilado a WebAssembly y se ejecuta 100% en el cliente. Arrastras un archivo `.ps`, lo sueltas en la página y el renderizado ocurre ahí mismo.
+
+## PostScript no es solo para imprimir
+
+Mucha gente piensa en PostScript como "el lenguaje de las impresoras". Pero PostScript es un lenguaje de programación completo, basado en pila, con tipado dinámico, arrays, diccionarios y capacidad de definir funciones. Es primo lejano de Forth y, en cierto modo, abuelo espiritual de SVG.
+
+Aquí tienes un ejemplo real de PostScript que dibuja una espiral:
+
+```postscript
+%!PS-Adobe-3.0
+/inch {72 mul} def
+/newpath { } def  % redefinimos por claridad
+
+% Dibuja una espiral con N vueltas
+/spiral {
+  /turns exch def
+  /cx 200 def       % centro X
+  /cy 300 def       % centro Y
+  /maxr 150 def     % radio máximo
+
+  newpath
+  0 0 moveto
+  0 1 360 turns mul {
+    /angle exch def
+    /r angle 360 div maxr mul def
+    /x cx angle cos r mul add def
+    /y cy angle sin r mul add def
+    x y lineto
+  } for
+  stroke
+} def
+
+5 spiral
+showpage
+```
+
+Este programa define una función `spiral` que acepta el número de vueltas y dibuja una espiral trazando línea a línea desde el centro hacia fuera. La sintaxis es _postfija_: primero van los operandos y luego el operador. `5 spiral` significa "toma el 5 y pásaselo a spiral".
+
+Y sí, puedes ejecutar este código ahora mismo en [pagetable.com/retro-ps](https://www.pagetable.com/retro-ps).
+
+Aquí va otro ejemplo que genera un degradado radial programáticamente, demostrando que PostScript puede hacer gráficos procedurales sin depender de imágenes externas:
+
+```postscript
+%!PS-Adobe-3.0
+/width 400 def
+/height 400 def
+/cx width 2 div def
+/cy height 2 div def
+/maxr width 2 div def
+
+0 0 width height rectclip
+
+0 0.2 maxr {
+  /r exch def
+  r maxr div  1 exch sub  % intensidad: más brillo en el centro
+  setgray
+  newpath
+  cx cy r 0 360 arc
+  fill
+} for
+
+showpage
+```
+
+Aquí iteramos desde radio 0 hasta el radio máximo, dibujando círculos cada vez más oscuros. El resultado es un degradado radial suave, generado enteramente con código.
+
+## El límite de los 16.000 píxeles
+
+Hay un detalle que me parece fascinante: el operador `clip` del intérprete de Adobe tiene un tope interno de unos 16.000 píxeles por eje. Es un límite que los ingenieros de Adobe metieron en su día porque, bueno, ¿quién iba a necesitar más de 16.000 píxeles en una impresora de 1991?
+
+En la práctica, esto significa que el DPI máximo práctico en tamaño carta ronda los 1450 DPI, que sigue siendo una barbaridad para un intérprete que salió cuando Windows 3.1 era el futuro.
+
+## Mi opinión
+
+Este proyecto me toca varias teclas a la vez. La primera es puramente nostálgica: ver código de 1991 ejecutándose sin modificaciones, en un entorno para el que nunca fue diseñado, me produce una satisfacción difícil de explicar. No es un port, no es una reescritura, no es una recreación. Es el binario original, congelado en una ROM, corriendo en un emulador que finge ser hardware de los 90, compilado a WASM y ejecutándose en un motor V8. La cadena de capas de abstracción es ridícula y maravillosa al mismo tiempo.
+
+La segunda es más práctica: esto demuestra que los formatos abiertos y estables ganan a largo plazo. PostScript lleva 40 años sin cambiar. Un archivo `.ps` generado hoy funcionará en una impresora de 1991 o en un navegador de 2026. Compáralo con el ritmo al que rotan los frameworks JavaScript modernos.
+
+La tercera es una reflexión sobre lo que significa "código legacy". El intérprete de Adobe en ese cartucho es _legacy_ por edad, pero no por funcionalidad. Sigue siendo correcto, completo y útil. No necesitamos reescribirlo. Solo necesitábamos sacarlo de su jaula de plástico.
+
+Si tienes curiosidad, el proyecto está en [github.com/mist64/retro-ps](https://github.com/mist64/retro-ps), escrito en Rust y liberado bajo licencia abierta. Puedes compilarlo tú mismo o jugar con la demo online. Y si tienes un archivo `.ps` por ahí guardado de hace 20 años, este puede ser el momento de desempolvarlo.
