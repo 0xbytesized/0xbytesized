@@ -65,7 +65,7 @@ Pero lo que de verdad diferencia a Zed es su integración nativa con IA. No es u
 
 Zed permite ejecutar múltiples agentes de IA en paralelo dentro del editor. Las predicciones de edición (edit predictions) te sugieren el siguiente cambio a nivel de tecla —no de token, sino exactamente la edición que probablemente harías— con la misma latencia que el resto del editor.
 
-El protocolo de agentes que acompaña al lanzamiento (al que el equipo se refiere como Agent Client Protocol o ACP) es quizás lo más estratégico. Es un protocolo abierto que permite que distintos agentes de IA se conecten a Zed: Claude Agent, Codex, OpenCode y recientemente también Cursor. Zed no te obliga a usar su agente; te da el lienzo y deja que elijas.
+El protocolo de agentes que acompaña al lanzamiento es quizás lo más estratégico. Se trata de un protocolo abierto que, según la documentación del proyecto, permite que distintos agentes de IA se conecten a Zed: Claude Agent, Codex, OpenCode y, según parece, también Cursor. Zed no te obliga a usar su agente; te da el lienzo y deja que elijas.
 
 Configurar un agente en Zed es razonablemente directo. En tu `settings.json`:
 
@@ -73,10 +73,10 @@ Configurar un agente en Zed es razonablemente directo. En tu `settings.json`:
 {
   "agent": {
     "enabled": true,
-    "default_model": "claude-sonnet-4-5",
+    "default_model": "claude-sonnet-4",
     "models": [
       {
-        "name": "claude-sonnet-4-5",
+        "name": "claude-sonnet-4",
         "provider": "anthropic",
         "max_tokens": 8192
       }
@@ -91,11 +91,11 @@ Configurar un agente en Zed es razonablemente directo. En tu `settings.json`:
 
 No voy a fingir que he probado todos los agentes compatibles, pero la arquitectura es sólida: el protocolo define cómo un agente externo solicita leer archivos, proponer diffs y recibir feedback del usuario sin acoplarse a la UI de Zed. Es el tipo de diseño que permite que el ecosistema crezca sin que el editor haga de cuello de botella.
 
-## DeltaDB: lo que viene
+## DeltaDB y el futuro
 
-El anuncio también adelanta DeltaDB, un motor de sincronización basado en CRDTs que trackea cada cambio con granularidad de carácter. La idea es que múltiples humanos y agentes compartan una vista consistente del código mientras evoluciona.
+El anuncio también adelanta un motor de sincronización experimental basado en CRDTs que, según la documentación preliminar, trackearía cada cambio con granularidad de carácter. La idea es que múltiples humanos y agentes compartan una vista consistente del código mientras evoluciona.
 
-Si esto suena familiar, es porque recuerda a lo que Google Docs hace con texto plano, pero aplicado a código con agentes de IA metidos en medio. DeltaDB permitiría invitar a compañeros a conversaciones con agentes, revisar y evolucionar código generado por IA directamente en el contexto donde se generó. El equipo dice que esto requiere "propiedad profunda de las primitivas fundamentales", y que no sería posible dentro del motor de renderizado de otro navegador. Tiene sentido.
+Si esto suena familiar, es porque recuerda a lo que Google Docs hace con texto plano, pero aplicado a código con agentes de IA metidos en medio. Este tipo de motor permitiría invitar a compañeros a conversaciones con agentes, revisar y evolucionar código generado por IA directamente en el contexto donde se generó.
 
 ## Zed for Business
 
@@ -109,7 +109,7 @@ La velocidad es el argumento principal, y no es marketing. Zed arranca instantá
 
 Dicho esto, el ecosistema de extensiones sigue siendo la gran barrera. VS Code tiene más de 50.000 extensiones. Zed tiene unas pocas docenas hechas por la comunidad. Si tu flujo de trabajo depende de extensiones muy específicas —y el mío depende de varias—, cambiar de editor es un coste real.
 
-Lo de los agentes de IA me parece el movimiento correcto en el momento correcto. Todos los editores están metiendo IA a martillazos, pero Zed la diseñó como parte del núcleo desde el día uno. El Agent Client Protocol es un gol en propia puerta de VS Code: en lugar de encerrarte en Copilot, Zed te deja elegir. En 2026, eso es una declaración de principios.
+Lo de los agentes de IA me parece el movimiento correcto en el momento correcto. Todos los editores están metiendo IA a martillazos, pero Zed la diseñó como parte del núcleo desde el día uno. El protocolo abierto de agentes es un gol en propia puerta de VS Code: en lugar de encerrarte en Copilot, Zed te deja elegir. En 2026, eso es una declaración de principios.
 
 Si no has probado Zed o lo probaste hace un año y te fuiste porque le faltaba algo, la 1.0 es la excusa perfecta para darle otra oportunidad. No es perfecto, y el equipo lo admite. Pero es el intento más serio que he visto de construir un editor que trate a la GPU como ciudadana de primera clase, y eso merece respeto.
 

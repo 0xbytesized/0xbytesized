@@ -19,7 +19,7 @@ Zig tiene, sin exagerar, la política anti-LLM más estricta de cualquier proyec
 
 La parte de las traducciones es especialmente llamativa. El proyecto recomienda escribir en tu idioma nativo antes que pasar tu mensaje por un traductor automático basado en LLM. Prefieren que escribas en español, portugués o japonés a que uses ChatGPT para generar un inglés pulido pero despersonalizado.
 
-Esta política no es nueva —lleva años en pie—, pero ha vuelto al centro del debate por dos razones. Primero, porque Bun (el runtime de JavaScript escrito en Zig) fue adquirido por Anthropic en diciembre de 2025 y ahora opera su propio fork de Zig donde el uso de IA es la norma. Segundo, porque Bun anunció recientemente una mejora de rendimiento 4x en `bun compile` usando paralelización que no pueden upstreamar precisamente por esta política.
+Esta política no es nueva —lleva años en pie—, pero ha vuelto al centro del debate por dos razones. Primero, porque Bun (el runtime de JavaScript escrito en Zig) colabora estrechamente con Anthropic —la empresa detrás de Claude— y opera su propio fork de Zig donde el uso de IA es habitual. Segundo, porque Bun anunció recientemente una mejora de rendimiento en `bun compile` usando paralelización que no pueden upstreamar precisamente por esta política.
 
 La cuenta oficial de Bun en X lo dijo sin rodeos: "No planeamos upstreamear esto porque Zig prohíbe contribuciones generadas por LLMs."
 
@@ -51,7 +51,7 @@ Cro añade un dato demoledor sobre su experiencia real con PRs generados por IA:
 
 ## El contraejemplo: Bun
 
-Aquí es donde la historia se vuelve interesante. Bun, probablemente el proyecto más exitoso construido en Zig, fue adquirido por Anthropic —la empresa detrás de Claude— y naturalmente hace un uso intensivo de IA en su desarrollo.
+Aquí es donde la historia se vuelve interesante. Bun, probablemente el proyecto más exitoso construido en Zig, colabora estrechamente con Anthropic y naturalmente hace un uso intensivo de IA en su desarrollo.
 
 ¿El resultado? Bun tiene su propio fork de Zig (`oven-sh/zig`) donde aplican mejoras que no pueden enviar upstream. Su mejora de rendimiento 4x en `bun compile`, conseguida añadiendo análisis semántico paralelo y múltiples unidades de codegen al backend LLVM, es técnicamente impresionante. Pero no puede volver al tronco principal.
 
