@@ -1,0 +1,156 @@
+---
+title: "WhatCable: el inspector de cables USB‑C para macOS"
+date: 2026-05-02T08:00
+tags: ["usb-c", "macos", "swift", "iokit", "herramientas"]
+excerpt: "Una app open source para macOS lee los chips internos de tus cables USB‑C y te dice qué pueden hacer de verdad: potencia, velocidad y protocolos soportados."
+---
+
+## El caos silencioso del USB‑C
+
+Tengo un cajón lleno de cables USB‑C. Todos miden más o menos un metro, todos tienen el mismo conector en ambas puntas, y si los mezclo soy incapaz de distinguir cuál carga a 100W, cuál solo pasa datos a 480 Mbps y cuál es Thunderbolt 4 de 40 Gbps. Y no soy el único: cada desarrollador con el que hablo tiene el mismo problema.
+
+Ayer, un ingeniero llamado Darryl Morley publicó [WhatCable](https://github.com/darrylmorley/whatcable) en Hacker News y en 24 horas acumuló casi 500 puntos, 142 comentarios y más de 960 estrellas en GitHub. La reacción fue abrumadora, y es fácil ver por qué: resuelve un dolor real y lo hace con una ejecución impecable.
+
+WhatCable es una app de barra de menú para macOS que lee, a través de IOKit, los datos que el sistema ya tiene sobre cada cable USB‑C conectado y los traduce a lenguaje humano. Nada de "VID 0x18D1", nada de "PDO 5V@3A". Te dice: "Thunderbolt 4, 100W, 40 Gbps".
+
+## Qué muestra realmente
+
+Cuando abres el popover de WhatCable ves, para cada puerto de tu Mac:
+
+- **Un titular claro:** "Thunderbolt / USB4", "Solo carga", "USB 2.0 lento" o "Nada conectado".
+- **Diagnóstico de carga:** Te explica por qué tu Mac carga despacio. Si el cable limita la velocidad, te lo dice. Si es el cargador, también. Si la batería está casi llena y el Mac está pidiendo menos potencia, lo identifica.
+- **Datos del chip e‑marker:** Velocidad real del cable (USB 2.0, 5, 10, 20, 40 u 80 Gbps), amperaje nominal (3A o 5A) y fabricante del chip.
+- **Lista de PDOs del cargador:** Todos los perfiles de voltaje que ofrece la fuente (5V, 9V, 12V, 15V, 20V…) con el perfil activo resaltado en tiempo real.
+- **Identidad del dispositivo conectado:** Fabricante y tipo de producto extraídos de la respuesta PD Discover Identity.
+- **Dispositivos USB colgados:** Hubs, discos y periféricos agrupados bajo el puerto físico al que pertenecen.
+- **Transportes activos:** USB 2, USB 3, Thunderbolt, DisplayPort.
+
+Y si pulsas ⌥ y haces clic en el icono, te suelta crudamente todas las propiedades IOKit para que los ingenieros hurguen.
+
+## Cómo funciona por dentro: IOKit sin magia negra
+
+La parte que más me gusta de WhatCable es que no usa APIs privadas ni entitlements especiales. Todo lo que lee es información pública expuesta por IOKit. La app consulta cuatro familias de servicios:
+
+| Servicio IOKit | Qué proporciona |
+|---|---|
+| `AppleHPMInterfaceType10/11/12` | Estado del puerto: conexión, transportes, orientación del enchufe, presencia de e‑marker |
+| `IOPortFeaturePowerSource` | Lista completa de PDOs del cargador y perfil activo |
+| `IOPortTransportComponentCCUSBPDSOP` | VDOs de PD Discover Identity para el dispositivo (SOP) y el cable (SOP') |
+| Subárbol XHCI | Dispositivos USB emparejados con su puerto físico |
+
+El descifrado de velocidad y potencia sigue la especificación USB Power Delivery 3.x. Es un trabajo de ingeniería inversa de especificaciones, no de binarios. Morley se ha leído la documentación del estándar y ha escrito un montón de bit‑twiddling para extraer significado de campos como `bcdUSB`, `bMaxPower` o los VDOs del cable.
+
+Aquí tenéis un ejemplo simplificado de cómo leer propiedades de un puerto USB‑C desde Swift usando IOKit, en el espíritu de lo que hace WhatCable:
+
+```swift
+import IOKit
+
+func readUSBPortInfo(portName: String) -> [String: Any]? {
+    var iterator: io_iterator_t = 0
+    let matchingDict = IOServiceMatching("AppleHPMInterfaceType11")
+
+    guard IOServiceGetMatchingServices(
+        kIOMainPortDefault,
+        matchingDict,
+        &iterator
+    ) == KERN_SUCCESS else { return nil }
+
+    defer { IOObjectRelease(iterator) }
+
+    var result: [String: Any] = [:]
+    var service = IOIteratorNext(iterator)
+
+    while service != 0 {
+        if let name = IORegistryEntryCreateCFProperty(
+            service,
+            "name" as CFString,
+            kCFAllocatorDefault,
+            0
+        )?.takeRetainedValue() as? String,
+           name == portName {
+
+            let props = [
+                "transport",
+                "connection-state",
+                "plug-orientation"
+            ]
+
+            for prop in props {
+                if let value = IORegistryEntryCreateCFProperty(
+                    service,
+                    prop as CFString,
+                    kCFAllocatorDefault,
+                    0
+                )?.takeRetainedValue() {
+                    result[prop] = value
+                }
+            }
+            break
+        }
+        IOObjectRelease(service)
+        service = IOIteratorNext(iterator)
+    }
+
+    return result.isEmpty ? nil : result
+}
+```
+
+Este código no es una copia del fuente de WhatCable, pero captura la esencia de cómo funciona: iteras sobre los servicios IOKit que coinciden con un patrón (`IOServiceMatching`), consultas propiedades (`IORegistryEntryCreateCFProperty`) y devuelves los resultados. Sin entitlements, sin drivers custom, sin privilegios de root.
+
+## Por qué el chip e‑marker es la clave
+
+Los cables USB‑C que soportan más de 3A o velocidades superiores a USB 2.0 llevan un pequeño chip llamado **e‑marker** (electronically marked cable). Este chip contiene una memoria con los datos de fabricación y capacidades del cable: velocidad máxima, corriente nominal, vendor ID y tipo de cable.
+
+WhatCable lee estos datos mediante el comando PD Discover Identity dirigido a SOP' (la nomenclatura USB‑PD para "habla con el chip del cable, no con el dispositivo"). La respuesta viene codificada en VDOs (Vendor Defined Objects), y el código los decodifica siguiendo la estructura definida en la especificación.
+
+Hay una advertencia importante que la documentación de WhatCable menciona explícitamente: **confía en lo que dice el e‑marker**. Si un fabricante sin escrúpulos flashea un chip para que mienta sobre sus capacidades, WhatCable te mostrará datos falsos porque no hay forma de verificarlos por software. No es un fallo de la app: es una limitación física. El único modo de comprobar un cable de verdad es enchufarlo a un analizador de tráfico USB‑PD, y eso cuesta varios cientos de euros.
+
+## La limitación Apple Silicon
+
+Un detalle técnico relevante: WhatCable solo funciona en Macs con Apple Silicon (M1 en adelante). Los Mac Intel usan controladores Thunderbolt 3 de Intel (Titan Ridge / JHL9580), y el driver IOKit de Apple para esos chips no expone el estado de negociación USB‑PD ni los VDOs del e‑marker. No es una decisión arbitraria: simplemente no hay datos que leer.
+
+Esto refleja una realidad más amplia del ecosistema Mac: a medida que Apple avanza con su propio silicio, ciertas capacidades de bajo nivel quedan relegadas a la nueva arquitectura. Si tienes un Mac Intel, esta herramienta no es para ti. Pero si tienes un M1 o superior, tienes acceso a información sobre tus cables que antes requería hardware especializado.
+
+## CLI para scripting y automatización
+
+WhatCable no es solo una app gráfica. Incluye un binario de línea de comandos que comparte el mismo motor de diagnóstico:
+
+```bash
+whatcable                 # resumen legible de cada puerto
+whatcable --json          # JSON estructurado para scripts
+whatcable --watch         # streaming en vivo (Ctrl+C para salir)
+whatcable --raw           # incluye propiedades IOKit sin filtrar
+```
+
+Esto abre posibilidades interesantes para automatización. Puedes integrarlo en scripts de diagnóstico, monitorizar el estado de carga en dashboards, o incluso disparar notificaciones cuando un cable problemático se conecte:
+
+```bash
+#!/bin/bash
+# Monitoriza la velocidad de carga y alerta si es anormalmente baja
+whatcable --json | jq -r '
+  .ports[] |
+  select(.charging_wattage != null and .charging_wattage < 15) |
+  "⚠️  \(.port_name): solo \(.charging_wattage)W - ¿cable lento?"
+'
+```
+
+## Instalación en dos comandos
+
+Instalarlo es trivial:
+
+```bash
+brew tap darrylmorley/whatcable
+brew install --cask whatcable
+```
+
+O descargar el ZIP de la página de releases, descomprimir y arrastrar a `/Applications`. La app está firmada con Developer ID y notarizada por Apple, así que Gatekeeper no se queja. Pesa poco, consume cero CPU cuando no estás interactuando con ella, y hace exactamente una cosa bien.
+
+## Mi veredicto
+
+Llevo usando WhatCable desde ayer y ya me ha salvado de dos situaciones ridículas. La primera: tenía un monitor externo que no daba señal y resultó que el cable era USB 2.0 de carga — ni siquiera llevaba los pines de datos de alta velocidad. La segunda: mi Mac cargaba a 20W con un cargador de 96W porque el cable estaba limitado a 3A. Ambas cosas las detecté en segundos.
+
+Lo que me convence de esta herramienta no es solo su utilidad inmediata, sino la filosofía con la que está construida. Es software que respeta al usuario: open source (MIT), sin tracking, sin suscripciones, sin cuentas, sin nube. Un binario pequeño que hace una cosa y la hace bien. El tipo de software que echo de menos en 2026.
+
+Hay algo casi terapéutico en enchufar un cable, abrir WhatCable y ver confirmado o desmentido lo que sospechabas. Ese cable que compraste en Amazon por 8 euros y prometía Thunderbolt 4 probablemente miente — y ahora puedes demostrarlo con datos.
+
+Si tienes un Mac con Apple Silicon y alguna vez te has preguntado "¿este cable sirve para esto?", instálalo. Son 30 segundos que te ahorrarán horas de debug físico.
