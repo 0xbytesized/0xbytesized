@@ -1,0 +1,165 @@
+---
+title: "El renacimiento de las TUIs: la terminal contraataca"
+date: "2026-05-03T20:54"
+tags: ["tui", "terminal", "python", "go", "rust", "interfaces"]
+excerpt: "Las interfaces de terminal vuelven con fuerza mientras los toolkits nativos se desmoronan. Textual, Bubble Tea y Ratatui demuestran que la terminal es el nuevo campo de juego del desarrollo UI."
+---
+
+Las interfaces de terminal, esas que muchos dábamos por muertas cuando llegó el ratón, están de vuelta. Y no como curiosidad nostálgica: vuelven con frameworks modernos, renders a 60 FPS, componentes reactivos y una experiencia de desarrollo que hace que los toolkits nativos parezcan un castigo.
+
+El artículo [Why TUIs Are Back](https://wiki.alcidesfonseca.com/blog/why-tuis-are-back/) de Alcides Fonseca ha puesto el dedo en la llaga. Mientras Microsoft lleva tres décadas reinventando su stack de UI cada cinco años sin que ninguno cuaje del todo, y Apple se dedica a ignorar sus propias guías de diseño mientras añade iconos a cada menú del sistema, la terminal —ese rectángulo negro que lleva con nosotros desde los 70— se ha convertido en el único entorno de interfaz verdaderamente multiplataforma, consistente y productivo que tenemos.
+
+## El desastre de los toolkits nativos
+
+Hagamos un repaso rápido. Windows ha pasado por MFC, OLE, COM, ActiveX, WinForms, WPF, Silverlight, WinUI y MAUI. Cada uno con sus propias reglas, sus propias limitaciones y su propio cementerio de aplicaciones abandonadas. Jeffrey Snover, el creador de PowerShell, lo resumió con una frase demoledora: MFC era "Win32 llevando un esmoquin hecho de otros esmoquins". El resultado es que en 2026 la mayoría de aplicaciones "nativas" de Windows siguen siendo Electron con un disfraz.
+
+En Linux la historia es distinta pero no mejor. GTK y Qt llevan décadas coexistiendo sin que ninguna aplicación se vea igual que la de al lado. La fragmentación es tan profunda que casi nadie se molesta en desarrollar aplicaciones nativas para Linux. Las empresas lanzan webapps y, si acaso, las empaquetan en Electron.
+
+macOS era el refugio. Apple publicó las Human Interface Guidelines, invirtió en investigación de usabilidad y durante años fue el estándar de oro del diseño de interfaces. Pero en las últimas versiones la consistencia se ha ido por el desagüe. Ventanas que no se pueden redimensionar sin un máster en pixel hunting, iconos metidos con calzador en cada menú contextual y un desprecio olímpico por la ley de Fitts que haría llorar a cualquier diseñador de UX.
+
+## Electron: el parche que se convirtió en la norma
+
+Electron resolvió el problema real de "necesito una app que funcione en los tres sistemas operativos sin volverme loco". Pero a costa de crear otro: aplicaciones que consumen gigas de RAM, que ignoran los atajos de teclado del sistema operativo y que se sienten como páginas web metidas en una ventana —porque literalmente lo son.
+
+Fonseca lo ilustra con un ejemplo que cualquiera que use VS Code o Cursor reconoce: si estás en el panel del agente pidiendo tu siguiente feature, ¿puedes navegar al panel lateral solo con teclado? ¿Puedes archivar una conversación sin tocar el ratón? Son acciones que en una app nativa de macOS llevarían atajos estándar documentados en los menús. En Electron, con suerte existen y desde luego no los anuncia nadie.
+
+## Por qué la terminal gana
+
+Las TUIs tienen tres ventajas que los GUIs modernos han perdido por el camino:
+
+**Son rápidas.** No hay DOM, no hay layout engine, no hay capas de abstracción que recorrer. Dibujar caracteres en una cuadrícula de texto es un problema resuelto desde los 80.
+
+**Son automatizables.** No necesitas Automator, ni AppleScript, ni un helper de accesibilidad. Todo lo que aparece en pantalla es texto y todo lo que introduzcas es texto. Puedes redirigir, pipear, guardar en un fichero o enviar por SSH sin esfuerzo.
+
+**Son ubicuas y consistentes.** Una TUI bien escrita funciona igual en macOS, Linux, Windows, un contenedor sin cabeza o un iPad conectado por SSH a una máquina remota. El contexto de interacción es siempre el mismo: una cuadrícula de caracteres y un teclado.
+
+Y luego está el factor decisivo: las herramientas de desarrollo por línea de comandos han explotado en popularidad. Claude Code, Codex CLI y compañía han demostrado que se puede hacer trabajo complejo desde la terminal sin echar de menos una GUI. De hecho, el modelo de "agente conversacional en la terminal" es más natural que incrustar un chat en un panel lateral de un editor.
+
+## Tres frameworks modernos de TUI que deberías conocer
+
+La clave del renacimiento de las TUIs no es solo filosófica: es que por fin tenemos frameworks serios que hacen que desarrollar una interfaz de terminal sea tan agradable como desarrollar una webapp.
+
+### Textual (Python)
+
+Textual es el framework que más está empujando el renacimiento TUI. Creado por Will McGugan (el mismo que hizo Rich), trae un modelo de componentes con CSS, un sistema de layouts y renderizado asíncrono. Se siente como desarrollar con React pero para la terminal.
+
+```python
+from textual.app import App, ComposeResult
+from textual.widgets import Header, Footer, Static, Button
+
+class MiApp(App):
+    CSS = """
+    Static {
+        padding: 1;
+        content-align: center middle;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        yield Static("¿Todo bien por aquí?")
+        yield Button("Púlsame", id="btn")
+        yield Footer()
+
+    def on_button_pressed(self) -> None:
+        self.exit()
+
+if __name__ == "__main__":
+    MiApp().run()
+```
+
+Lo interesante de Textual es que no intenta simular HTML en la terminal: entiende el medio. Sabe que tienes una cuadrícula de caracteres de ancho y alto fijos, y te da herramientas para trabajar con eso. Los layouts (`Horizontal`, `Vertical`, `Grid`) funcionan de verdad, y el sistema de temas te deja cambiar colores con variables CSS de toda la vida.
+
+### Bubble Tea (Go)
+
+Charmbracelet lleva años construyendo un ecosistema de herramientas de terminal que da gusto usar. Bubble Tea es su framework de TUIs basado en la arquitectura Elm: tu aplicación tiene un modelo, una función `Init`, una `Update` que recibe mensajes y devuelve un nuevo modelo y una `View` que pinta el estado actual.
+
+```go
+package main
+
+import (
+    "fmt"
+    tea "github.com/charmbracelet/bubbletea"
+)
+
+type model struct {
+    cuantos int
+}
+
+func (m model) Init() tea.Cmd {
+    return nil
+}
+
+func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+    switch msg.(type) {
+    case tea.KeyMsg:
+        m.cuantos++
+    }
+    return m, nil
+}
+
+func (m model) View() string {
+    return fmt.Sprintf(
+        "Has pulsado %d teclas\n\nPulsa q para salir\n",
+        m.cuantos,
+    )
+}
+
+func main() {
+    p := tea.NewProgram(model{})
+    if _, err := p.Run(); err != nil {
+        panic(err)
+    }
+}
+```
+
+El ecosistema Bubble Tea incluye componentes como `bubble-table` para tablas, `textinput` para campos de entrada con autocompletado y `lipgloss` para estilos declarativos. Entre Glow (lector de Markdown), Soft Serve (servidor Git) y Huh (formularios interactivos), Charmbracelet está construyendo lo más parecido a un "design system" para terminal que existe hoy.
+
+### Ratatui (Rust)
+
+Si quieres velocidad y control total, Ratatui es tu herramienta. Renderiza a golpe de `draw` síncrono sobre un backend abstracto —normalmente Crossterm— y te da widgets componibles con un sistema de layouts que recuerda a los antiguos toolkits de GUI pero aplicado a caracteres.
+
+```rust
+use ratatui::{
+    backend::CrosstermBackend,
+    layout::{Constraint, Direction, Layout},
+    widgets::{Block, Borders, Paragraph},
+    Terminal,
+};
+use std::io;
+
+fn main() -> io::Result<()> {
+    let backend = CrosstermBackend::new(io::stdout());
+    let mut terminal = Terminal::new(backend)?;
+
+    terminal.draw(|frame| {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Percentage(80), Constraint::Percentage(20)])
+            .split(frame.area());
+
+        let header = Paragraph::new("Mi app en Rust")
+            .block(Block::default().borders(Borders::ALL));
+
+        let footer = Paragraph::new("q para salir | arrows para navegar")
+            .block(Block::default().borders(Borders::ALL));
+
+        frame.render_widget(header, chunks[0]);
+        frame.render_widget(footer, chunks[1]);
+    })?;
+
+    Ok(())
+}
+```
+
+Ratatui no te da un bucle de eventos como Textual o Bubble Tea: tú conectas el backend que quieras (Crossterm, Termion, Termwiz) y gestionas el event loop a mano. Es más verboso, pero te da un control absoluto sobre cada frame. Para aplicaciones que necesitan renderizar mucho estado rápido —dashboards, monitores de sistema, visores de logs— es imbatible.
+
+## Mi veredicto
+
+El renacimiento de las TUIs no es una moda retro. Es una reacción racional ante tres décadas de fragmentación de toolkits nativos, Electron convertido en monocultivo y una generación de desarrolladores que han descubierto que la terminal no es un estorbo: es el entorno más productivo que existe para cierto tipo de trabajo.
+
+Dicho esto, no creo que las TUIs vayan a reemplazar a las GUIs para todo. Una TUI nunca será la mejor opción para editar una imagen, ver un vídeo o navegar por una web con CSS complejo. Pero para herramientas de desarrollo, dashboards, clientes de bases de datos, gestores de paquetes, interfaces de configuración y un montón de casos más, la TUI es simplemente superior en términos de eficiencia, mantenibilidad y experiencia de usuario consistente.
+
+Lo que me gustaría ver es que los sistemas operativos tomasen nota. Si Microsoft, Apple y las distros Linux invirtiesen en hacer que las aplicaciones de terminal se integrasen de verdad —notificaciones nativas desde TUIs, mejor soporte de fuentes y emoji, aceleración por GPU para el renderizado de texto— el ecosistema daría un salto generacional. Por ahora, frameworks como Textual, Bubble Tea y Ratatui están haciendo el trabajo pesado. Y lo están haciendo muy bien.
+
+Si no has probado a construir una TUI con herramientas modernas, hazlo. Te vas a sorprender de lo lejos que ha llegado un rectángulo negro de 80 columnas.
