@@ -1,0 +1,147 @@
+---
+title: "Dos millones de líneas de Haskell en producción: lo que Mercury nos enseña"
+date: "2026-05-03T08:00"
+tags: ["haskell", "produccion", "fintech", "ingenieria-software", "tipos"]
+excerpt: "Mercury mueve 248 mil millones de dólares al año con 2 millones de líneas de Haskell mantenidas por gente que aprendió el lenguaje sobre la marcha. ¿El secreto? Tratar el sistema de tipos como herramienta operacional."
+---
+
+Hace unos días Ian Duncan, ingeniero del equipo de estabilidad de Mercury, publicó un artículo en el blog oficial de Haskell que me dejó dándole vueltas a la cabeza durante horas. El titular ya era contundente: "A Couple Million Lines of Haskell: Production Engineering at Mercury". Pero lo que había dentro era mucho más interesante que una cifra grandilocuente.
+
+Mercury es un banco digital para startups que procesó 248 mil millones de dólares en transacciones durante 2025, con 650 millones en ingresos anualizados y unos 1.500 empleados. Su codebase de backend son —redoble de tambor— dos millones de líneas de Haskell. Y aquí viene el dato que tumba el estereotipo: la mayoría de sus ingenieros jamás habían escrito Haskell antes de entrar.
+
+No es un experimento académico. Es un banco real, supervisado por reguladores, que sobrevivió a la crisis del SVB absorbiendo dos mil millones en depósitos en cinco días sin despeinarse. Así que cuando Duncan dice que el sistema de tipos es más una herramienta operacional que una prueba de corrección, conviene escuchar.
+
+## Pureza es una frontera, no una propiedad
+
+La primera lección que suelta Duncan es una bomba de relojería conceptual: la pureza en Haskell no es algo que el lenguaje *sea*, sino algo que tus interfaces *imponen*. Es una frontera que tú decides dónde trazar.
+
+Mira este ejemplo inspirado en los patrones que describe Duncan. Imagina que necesitas asegurar que ciertos efectos secundarios (publicar un evento, enviar una notificación) ocurren dentro de la misma transacción de base de datos. Ni antes, ni después, ni en una transacción separada. La solución ingenua es documentarlo:
+
+```haskell
+-- Usa esta, no la otra (pero no podemos impedir que uses la otra)
+escribirConEventos :: Transaccion -> [Evento] -> IO ()
+-- No uses esta directamente
+escribirTransaccion :: Transaccion -> IO ()
+publicarEventos :: [Evento] -> IO ()
+```
+
+Esto funciona hasta que deja de funcionar. Y "deja de funcionar" suele llegar un viernes por la tarde cuando la persona que escribió el wiki está de vacaciones. La alternativa es rediseñar los tipos para que el camino correcto sea el único camino:
+
+```haskell
+data Transact a  -- opaco, no ejecutable directamente
+
+registrar :: Transaccion -> Transact ()
+emitir :: Evento -> Transact ()
+
+-- El ÚNICO punto de salida: confirma y publica atómicamente
+confirmar :: Transact a -> IO a
+```
+
+Ahora el conjuro operacional es la única puerta de la habitación. No puedes olvidarlo porque no existe otra cosa que hacer. El compilador se ha convertido en el guardián de la memoria institucional. Cuando un ingeniero nuevo pregunta "¿cómo escribo una transacción?", el sistema de tipos le responde. Cuando un senior se va, la respuesta sigue ahí.
+
+Esto no es magia. Es diseño de interfaces. Y es brutalmente efectivo.
+
+## El sistema de tipos como prótesis de memoria organizacional
+
+Duncan insiste en algo que me parece brillante: en una empresa que crece al doble cada año, la mitad de tus compañeros siempre tendrá menos de un año de experiencia. La gente se va, cambia de equipo, se pilla vacaciones o baja de parental. Las cosas que sabe la gente se van con ella a menos que las hayas escrito en algún sitio. E idealmente, en un sitio que el compilador pueda leer.
+
+Un wiki se desactualiza. Un hilo de Slack de hace nueve meses no es exactamente un pilar de ingeniería robusta. Pero un tipo que impide compilar si no haces lo correcto —eso sí que es un guardián fiable.
+
+El patrón se repite por todo Mercury. No es que estén haciendo demostraciones formales de corrección con tipos dependientes en cada esquina. Es que usan los tipos para hacer que la práctica correcta de operaciones sea el camino de menor resistencia. Como dice Duncan: "a menudo no necesitamos un teorema. Necesitamos un diseño que le ponga difícil a un ingeniero ocupado hacer accidentalmente lo incorrecto mientras intenta hacer otra docena de cosas perfectamente razonables".
+
+## La parte fea también importa: ejecución durable
+
+Los sistemas financieros no tienen la cortesía de permanecer dentro de una sola transacción. Un pago implica enviar una orden, esperar confirmación, actualizar el libro mayor, notificar al cliente, gestionar cancelaciones, timeouts y el caso en que el partner dijo "sí" pero tu worker murió antes de apuntarlo.
+
+Mercury solía coordinar todo esto con máquinas de estados respaldadas en base de datos, cron jobs y lógica de reintento desperdigada por el código. Funcionaba, pero requería una vigilancia que Duncan compara con "desactivar artefactos explosivos sin detonar". Frágil, difícil de razonar, y fuente desproporcionada de incidentes.
+
+La solución fue adoptar Temporal, un framework de ejecución durable. Escribes tu flujo de trabajo como código secuencial normal, y la plataforma graba cada paso en un historial de eventos. Si un worker se muere a mitad de un workflow, otro worker reproduce el prefijo determinista y continúa desde donde se quedó. Reintentos, timeouts, cancelaciones: todo lo gestiona la plataforma.
+
+Lo fascinante es cómo encaja con Haskell:
+
+```haskell
+-- Un workflow de Temporal es, conceptualmente,
+-- una función pura sobre su historial de eventos
+workflowPago :: PagoInput -> Workflow PagoOutput
+workflowPago input = do
+    resultado <- activity (enviarPago input)
+    case resultado of
+        Confirmado ref -> do
+            activity (actualizarLibroMayor ref)
+            activity (notificarCliente input.clienteId ref)
+        Rechazado motivo -> do
+            activity (registrarRechazo input motivo)
+            activity (notificarCliente input.clienteId motivo)
+```
+
+El workflow *orquesta*, las activities *ejecutan*. Si has dedicado algún tiempo a pensar en la arquitectura "núcleo puro / envoltura con efectos", esto es ese modelo con la plataforma imponiendo la separación. El workflow es determinista por requisito de Temporal —mismas entradas, mismas salidas—, exactamente la misma restricción que Haskell impone al código puro. Mercury incluso liberó hs-temporal-sdk, su SDK de Haskell para Temporal.
+
+## Dominio vs. transporte: no dejes que HTTP se cuele en tu lógica de negocio
+
+Otro patrón que me encantó: modela los errores de dominio como tipos de dominio, no como códigos HTTP. Duncan cuenta cómo en Mercury tenían código que lanzaba excepciones con status codes HTTP directamente. Era razonable cuando ese código solo se ejecutaba en un request handler. Luego pasó a ejecutarse en cron jobs, en workers, en workflows de Temporal. Y de repente un cron job estaba lanzando un StatusCodeException 409 "Conflict".
+
+Un cron job no tiene a nadie esperando un 409. Ese error se propagó porque la abstracción original estaba acoplada a su capa de transporte.
+
+La alternativa es simple:
+
+```haskell
+data ErrorPago
+    = FondosInsuficientes
+    | PeticionDuplicada RequestId
+    | PartnerNoResponde Partner
+
+-- Traducciones finas en cada frontera
+aHttpError :: ErrorPago -> HttpResponse
+aHttpError FondosInsuficientes      = err402 "Fondos insuficientes"
+aHttpError (PeticionDuplicada _)    = err409 "Petición duplicada"
+aHttpError (PartnerNoResponde _)    = err502 "Partner no disponible"
+
+aEstrategiaWorker :: ErrorPago -> WorkerAction
+aEstrategiaWorker FondosInsuficientes    = Fallar "Sin fondos"
+aEstrategiaWorker (PeticionDuplicada _)  = Omitir
+aEstrategiaWorker (PartnerNoResponde _)  = ReintentarConBackoff
+```
+
+No es nada revolucionario. Pero Duncan señala algo clave: es asombroso cuánto se salta esto en la práctica. El código se escribe para un contexto, y cuando te das cuenta de que se llama desde tres contextos distintos, las excepciones HTTP ya son load-bearing porque alguien decidió capturarlas como parte de la lógica de negocio.
+
+## El patrón monoidal para interceptores
+
+La parte más elegante del artículo es cómo Mercury compone interceptores para sus workers de Temporal. Cada interceptor es una transformación que envuelve el comportamiento base. El truco está en que estas transformaciones forman un monoide bajo composición:
+
+```haskell
+-- Cada interceptor añade una preocupación transversal
+-- sin tocar a los demás
+appTemporalInterceptors = mconcat
+    [ interceptorRedireccion
+    , interceptorOpenTelemetry
+    , interceptorSentry
+    , interceptorTimeout
+    , interceptorLogging
+    ]
+
+-- Un interceptor se define en aislamiento:
+interceptorTimeout = mempty
+    { activityTimeout = \next input ->
+        next input >>= withTimeout 30
+    }
+```
+
+Quince ingenieros pueden escribir quince interceptores en paralelo, cada uno en su módulo, cada uno pensando en una sola preocupación. La composición es `(<>)`. No hay cableado oculto. No hay impuesto de coordinación más allá de acordar la forma de los hooks. El orden es explícito en la lista.
+
+Este patrón de "mempty + sobrescribir un campo" es puro pragmatismo con fundamento algebraico. Duncan lo describe como "hacer que componer N preocupaciones transversales independientes sea trivialmente correcto por construcción".
+
+## Mi veredicto
+
+Lo que más valoro del artículo de Duncan es que no es una oda a la pureza ni un sermón sobre categoría. Es un ingeniero de producción diciendo "esto es lo que funciona y esto es lo que no" después de años de operar un sistema financiero real.
+
+Hay tres ideas que me llevo:
+
+1. **El sistema de tipos como memoria institucional.** No para demostrar teoremas, sino para que el conocimiento operacional sobreviva a la rotación de personal. En un sector donde el tiempo medio de permanencia de un ingeniero roza lo ridículo, esto es oro puro.
+
+2. **La pureza como herramienta de diseño, no como ideología.** "¿Dónde está la impureza y qué partes del código tienen permiso para saberlo?" es una pregunta mucho más útil que "¿es esto puro?". Define fronteras, no estados mentales.
+
+3. **Observabilidad por construcción.** Si una librería expone sus funciones como valores concretos en vez de como un record de funciones, te quedas sin poder instrumentarla. En producción, eso es una sentencia de muerte silenciosa.
+
+Duncan cierra con una petición a los autores de paquetes de Haskell que suscribo completamente: añadid instrumentación OpenTelemetry a vuestras librerías. No logueéis directamente a stderr. Exponed módulos `.Internal` para que la gente no tenga que forkear vuestro código cuando la API pública no cubre su caso. Dejad escotillas de escape.
+
+Dos millones de líneas de Haskell en un banco de verdad no son un argumento teórico a favor de la programación funcional. Son la demostración de que, con el diseño de interfaces adecuado y una buena dosis de pragmatismo, se puede construir software financiero que no requiera un ejército de iniciados para mantenerse en pie. El compilador como guardián de la memoria organizacional. Y funciona.
