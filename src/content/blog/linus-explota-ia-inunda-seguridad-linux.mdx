@@ -1,0 +1,153 @@
+---
+title: "Linus Torvalds: la IA ahoga la seguridad del kernel"
+date: "2026-05-18T12:00"
+tags: ["linux", "kernel", "ia", "seguridad", "open-source"]
+excerpt: "La lista de seguridad del kernel es 'casi ingobernable'. Linus Torvalds lo deja claro: si encuentras un bug con IA, manda un parche o no mandes nada."
+---
+
+El domingo 17 de mayo, Linus Torvalds publicó el anuncio de Linux 7.1-rc4. Lo que debería haber sido un correo rutinario de release candidate —"otra semana, otro rc"— incluía una sección que ha incendiado los foros de desarrollo: la lista de seguridad del kernel se ha vuelto **"almost entirely unmanageable"** (casi completamente ingobernable) por culpa de la avalancha de reportes generados con IA.
+
+No es un desliz casual. Linus lo ha escrito deliberadamente, con su tono característico: directo, sin filtros y con instrucciones precisas de lo que espera de quien use herramientas de IA para escanear el kernel.
+
+## Lo que dijo Linus (traducción literal)
+
+El párrafo completo del anuncio de 7.1-rc4 dice:
+
+> "El continuo aluvión de reportes de IA ha hecho que la lista de seguridad sea básicamente ingobernable, con una duplicación enorme porque distintas personas encuentran lo mismo con las mismas herramientas. La gente se pasa todo el tiempo reenviando cosas a las personas adecuadas o diciendo 'eso ya se arregló hace una semana/un mes' y apuntando a la discusión pública. Todo esto es trabajo inútil y estamos dejando claro que los bugs detectados por IA no son, por definición, secretos y tratarlos en una lista privada es una pérdida de tiempo para todos — y solo empeora la duplicación porque quienes reportan ni siquiera pueden ver los reportes de los demás."
+
+Y luego remata:
+
+> "Las herramientas de IA son geniales, pero solo si de verdad ayudan, en lugar de causar dolor innecesario y trabajo de mentira. [...] Si encontraste un bug usando herramientas de IA, lo más probable es que alguien más también lo haya encontrado. Si de verdad quieres aportar valor, lee la documentación, **crea también un parche** y añade valor real *encima* de lo que hizo la IA. No seas la típica persona que manda un reporte aleatorio sin entender nada."
+
+Esto no es una queja genérica. Es una llamada de atención desde la cima del desarrollo del kernel de Linux.
+
+## El problema real: la lista de seguridad es privada
+
+El problema tiene una causa estructural. La lista `security@kernel.org` es privada por diseño: si alguien encuentra una vulnerabilidad seria, la reporta ahí para que los maintainers tengan tiempo de preparar un fix antes de que se haga pública. Esto funcionó durante décadas.
+
+Pero ahora tienes a cientos de personas lanzando herramientas de IA contra el código del kernel, encontrando exactamente los mismos issues y mandando cada uno su reporte a la lista privada sin poder ver que otros 40 ya hicieron lo mismo. Los maintainers no solo tienen que leer cada reporte, sino que además tienen que responder a cada uno diciendo "ya lo arreglamos, mira este hilo público".
+
+El resultado: un embudo de trabajo falso que no produce ni un solo parche, solo ruido.
+
+## El caso Marian Corcodel: cuando no es ruido, es veneno
+
+Uno de los comentarios más votados en Hacker News señala un problema aún peor. Alguien bajo el nombre de **Marian Corcodel** lleva días spameando las listas del kernel con mensajes de 26 megabytes llenos de parches sin sentido, aparentemente generados por IA con la intención de **envenenar** los datos de entrenamiento de otros modelos.
+
+La táctica es perversa: si metes suficiente basura en las listas públicas del kernel, los LLMs que se entrenen con ese corpus absorberán código roto o exploits disfrazados de parches legítimos. Es un ataque de poisoning encubierto como contribución open source.
+
+Esto no es un bug. Es una estrategia de ataque a la cadena de suministro del software, usando las propias herramientas de la comunidad contra ella.
+
+## Cómo detectar reportes duplicados: un problema nada trivial
+
+Detectar que dos reportes hablan del mismo bug no es tan fácil como parece. La IA los redacta con vocabulario variado, distintos niveles de detalle y a veces alucina partes del análisis. Aquí va un ejemplo de cómo se podría abordar el problema con embedding similarity:
+
+```python
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+
+# Simulación: tres reportes de IA sobre el mismo bug real
+# CVE-2026-XXXXX en el driver vpu del kernel
+reportes = [
+    "Potential buffer overflow in vpu driver at line 342. "
+    "The memcpy call uses user-supplied length without bounds check. "
+    "Impact: local privilege escalation.",
+
+    "vpu_mmap function in drivers/media/platform/chips-media/wave677/"
+    "wave677-vpu.c does not validate the size parameter before calling "
+    "remap_pfn_range, leading to possible out-of-bounds memory mapping.",
+
+    "Found a security issue in the VPU subsystem. The mmap handler "
+    "accepts arbitrary sizes from userspace, allowing an attacker "
+    "to map physical memory beyond the intended range."
+]
+
+vectorizer = TfidfVectorizer(stop_words='english')
+tfidf = vectorizer.fit_transform(reportes)
+
+# Los tres reportes son el mismo bug: la similitud debería ser alta
+sim = cosine_similarity(tfidf)
+for i in range(len(reportes)):
+    for j in range(i+1, len(reportes)):
+        print(f"Similitud reporte {i+1} vs {j+1}: {sim[i][j]:.3f}")
+
+# Output esperado: > 0.40 entre reportes del mismo bug
+# Pero fíjate: sin conocer el código fuente, el modelo
+# no sabe que "vpu_mmap", "VPU subsystem" y "vpu driver"
+# se refieren a lo mismo. Necesitarías embeddings semánticos
+# entrenados con código de kernel para pillar esto.
+```
+
+El script ilustra el problema de fondo: incluso un detector automático de duplicados necesita entender el dominio. Sin contexto del código fuente, TF-IDF no va a relacionar "VPU subsystem" con "vpu driver" con "Chips&Media Wave677". Los maintainers humanos hacen esta conexión en segundos porque conocen el código. Una herramienta automática necesita embeddings entrenados específicamente con código del kernel.
+
+## El workflow que Linus quiere ver
+
+El mensaje de Linus no es "dejad de usar IA". Es "usadla bien". Aquí va un script conceptual que ilustra el flujo de trabajo que él describe: detectar con IA, verificar leyendo el código y enviar el parche:
+
+```bash
+#!/bin/bash
+# Workflow ideal para reportar bugs del kernel con ayuda de IA
+# según las instrucciones de Linus en el anuncio de 7.1-rc4
+
+BUG_FILE="$1"
+DESC="$2"
+
+echo "=== Paso 1: Detectaste algo con IA ==="
+echo "Bug candidato: $DESC"
+
+echo ""
+echo "=== Paso 2: Verifica en lore.kernel.org si ya se reportó ==="
+# Busca en archivos públicos antes de mandar nada
+curl -s "https://lore.kernel.org/all/?q=$(echo "$DESC" | jq -sRr @uri)" \
+  | grep -c "From:" > /tmp/search_results.txt
+echo "Hilos potencialmente relacionados: $(cat /tmp/search_results.txt)"
+
+echo ""
+echo "=== Paso 3: Lee la documentación relevante ==="
+echo "Documentación del subsistema: Documentation/$BUG_FILE"
+echo "Guía de reporte de bugs de seguridad:"
+echo "  Documentation/process/security-bugs.rst"
+echo "  Documentation/process/threat-model.rst"
+
+echo ""
+echo "=== Paso 4: Genera el parche (no solo el reporte) ==="
+git checkout -b fix/$(echo "$DESC" | sha256sum | cut -c1-12)
+# Editas el código fuente basándote en lo que encontraste
+# $EDITOR path/to/offending/file.c
+git add path/to/offending/file.c
+git commit -s -m "subsystem: fix $DESC
+
+Describe aquí POR QUÉ el cambio arregla el problema,
+basándote en tu comprensión del código, no en lo que dijo la IA.
+
+Link: https://lore.kernel.org/..."
+git format-patch -1 --to=maintainer@kernel.org
+
+echo ""
+echo "=== Paso 5: Envía el parche a la lista PÚBLICA ==="
+echo "Lista: linux-kernel@vger.kernel.org"
+echo "Mantenedor del subsistema: según scripts/get_maintainer.pl"
+echo ""
+echo "No uses security@kernel.org si el bug no es un secreto real."
+```
+
+Este workflow es la antítesis del drive-by report. No estás delegando en la IA: estás usando la IA como detector inicial y luego haciendo el trabajo de verdad —comprender, verificar y arreglar.
+
+## Mi opinión
+
+Llevo meses viendo este patrón y Linus tiene toda la razón. La barrera de entrada para "encontrar bugs" se ha desplomado, pero la barrera para entenderlos y arreglarlos sigue exactamente donde estaba.
+
+El problema no es que la IA encuentre bugs. Es que la IA ha creado una nueva categoría de contribuidor: el que aprieta un botón, recibe un informe generado automáticamente y lo reenvía sin siquiera leerlo. Ese contribuidor no suma, resta.
+
+Dicho esto, el problema estructural es real y no se resuelve solo con educación. La lista de seguridad privada no escala cuando tienes miles de escáneres automáticos corriendo 24/7. Tal vez la solución pase por un sistema público de reportes con deduplicación automática, similar a lo que hace syzbot con los crash reports del kernel. Si el bug ya es conocido públicamente (porque 300 IAs lo encontraron a la vez), mantenerlo en una lista privada es absurdo.
+
+Lo que sí me preocupa es el caso Corcodel. Si el poisoning de datasets se convierte en una táctica común, el código abierto tiene un problema serio. Porque la misma apertura que permite que cualquiera contribuya permite que cualquiera contamine. Y distinguir un parche legítimo de uno envenenado requiere exactamente el tipo de comprensión profunda que los drive-by reporters no tienen.
+
+En fin. Si usas IA para revisar código, hazle caso a Linus: lee, entiende y manda el parche. Si no vas a hacer las tres cosas, mejor no mandes nada.
+
+---
+
+**Fuentes:**
+- [Anuncio de Linux 7.1-rc4](https://lore.kernel.org/lkml/CAHk-=wi+JvcuKF2NaD_rGiYrwkR6rxh_2XZmx8BbYm00D1CvTA@mail.gmail.com/) (Linus Torvalds, 17 mayo 2026)
+- [The Register: Linux security mailing list 'almost unmanageable'](https://www.theregister.com/security/2026/05/18/linus-torvalds-says-ai-powered-bug-hunters-have-made-linux-security-mailing-list-almost-entirely-unmanageable/)
+- [Hilo de HN](https://news.ycombinator.com/item?id=48178692) (161 puntos, 79 comentarios)
+- [LWN: Linux 7.1-rc4](https://lwn.net/Articles/1073192/)
