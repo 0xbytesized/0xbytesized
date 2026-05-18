@@ -1,0 +1,172 @@
+---
+title: "jank: cómo un Clojure nativo dobló en velocidad a la JVM"
+date: "2026-05-18T06:00"
+tags: ["clojure", "jank", "llvm", "compiladores", "rendimiento"]
+excerpt: "De 5.522 ms a 114 ms en un benchmark recursivo. jank se ha construido su propio IR y acaba de demostrar que un Lisp nativo puede dejar atrás a la JVM."
+---
+
+Hace unos días me topé con una de esas historias que te reconcilian con el software artesanal. Jeaye Wilkerson lleva años construyendo **jank**, un dialecto de Clojure que compila a código nativo mediante LLVM en lugar de ejecutarse sobre la JVM. Y acaba de publicar los resultados de su última ronda de optimización: su Clojure nativo ya es el doble de rápido que el Clojure de toda la vida sobre la JVM.
+
+No es un benchmark sintético tramposo. Es un fibonacci recursivo de cinco líneas. Sin type hints. Sin trucos. El mismo código en ambos lados.
+
+## ¿Qué es jank?
+
+jank es un lenguaje de programación que toma la sintaxis, las estructuras de datos persistentes y la filosofía interactiva de Clojure y las sienta sobre C++ y LLVM en vez de sobre el ecosistema Java. El resultado: arrancas un REPL, evalúas código sobre la marcha con un JIT y cuando quieres desplegar compilas a binario nativo. Sin JVM, sin warmup, sin metadatos de dependencias de 200 líneas.
+
+```clojure
+;; Esto es Clojure estándar. También es jank.
+(defn -main [& args]
+  (loop [game-state (new-game!)]
+    (if (done? game-state)
+      (end-game! game-state)
+      (recur (next-state game-state)))))
+```
+
+Pero la magia de verdad está en que puedes incrustar C++ directamente dentro de tu código Clojure:
+
+```clojure
+(defn create-vertex-shader! []
+  (cpp/glCreateShader cpp/GL_VERTEX_SHADER))
+```
+
+Esto no es un FFI torpe con serialización de por medio. jank compila el C++ inline como parte del mismo módulo LLVM. Es la diferencia entre llamar a una función por teléfono y tenerla sentada al lado.
+
+## El problema: la JVM hace trampa
+
+Cuando Wilkerson midió el rendimiento inicial de jank con un fibonacci recursivo inocente, los números dolían:
+
+```
+JVM (OpenJDK 21): 200 ms
+jank (sin optimizar): 5.522 ms
+```
+
+Veintisiete veces más lento. Y aquí viene lo interesante: el código Clojure era **idéntico**. La diferencia no estaba en el lenguaje, estaba en dos décadas de ingeniería de la JVM.
+
+La JVM tiene algo que el mundo nativo no tiene: un **optimizador JIT adaptativo**. Mientras tu programa corre, la JVM observa qué funciones se llaman más, con qué tipos de argumentos y recompila sobre la marcha con optimizaciones cada vez más agresivas. Es un nivel de introspección en tiempo de ejecución que ni LLVM ni GCC ofrecen. En el mundo nativo, compilas una vez y lo que sale es lo que hay.
+
+Así que Wilkerson se puso manos a la obra con un arma nueva: un **IR intermedio propio**.
+
+## El IR: pensar en Clojure, no en C++
+
+Hasta ahora, jank generaba código C++ o LLVM IR directamente desde su AST. El problema es que LLVM IR trabaja a un nivel muy bajo: no tiene ni idea de qué es un `var` de Clojure, una secuencia lazy o una estructura persistente. Toda la semántica rica de Clojure se perdía en la traducción y LLVM no podía optimizar casi nada.
+
+La solución fue diseñar un IR específico para jank, en SSA (single static assignment) y organizado como grafo de flujo de control (CFG). Este IR opera al nivel semántico de Clojure, no al del hardware.
+
+El mismo fibonacci se traduce a algo como esto:
+
+```clojure
+{:name user_fibonacci_1
+ :blocks
+ [{:name entry
+   :instructions
+   [{:name n :op :parameter :type object_ref}
+    {:name v3 :op :literal :value 1 :type integer_ref}
+    {:name v4 :op :cpp/call :value "jank::runtime::lte" :args [n v3] :type bool}
+    {:name v6 :op :branch :condition v4 :then if0 :else else1}]}
+  {:name if0
+   :instructions
+   [{:name v7 :op :ret :value n}]}
+  {:name else1
+   :instructions
+   [{:name v8 :op :literal :value 1 :type integer_ref}
+    {:name v9 :op :cpp/call :value "jank::runtime::sub" :args [n v8] :type object_ref}
+    {:name v10 :op :named-recursion :fn fibonacci :args [v9] :type object_ref}
+    ;; ... segunda rama recursiva y suma ...
+    ]}]}
+```
+
+Fijaos en los detalles: `:op :var-deref` para acceder a vars de Clojure, `:op :dynamic-call` para llamadas polimórficas, `:op :named-recursion` para llamadas recursivas que el compilador puede reconocer. Cada concepto del lenguaje tiene su instrucción. Esto permite escribir pases de optimización que razonan sobre Clojure, no sobre registros y memoria.
+
+Seis semanas de trabajo para diseñarlo e implementarlo. Y una vez integrado, la caza de milisegundos comenzó.
+
+## La odisea de optimización, paso a paso
+
+### Acto I: inline de aritmética (5.522 → 2.309 ms)
+
+En Clojure, las funciones aritméticas como `+`, `-` o `<=` son polimórficas. Aceptan cualquier tipo numérico y resuelven en tiempo de ejecución. Eso implica boxing, unboxing y despacho dinámico constante.
+
+jank implementó inline de aritmética mediante metadatos en los vars, igual que hace Clojure JVM:
+
+```clojure
+(defn ^{:inline (fn [l r] (list 'cpp/jank.runtime.max l r))
+        :inline-arities #{2}}
+  max
+  ([x] x)
+  ([l r] (cpp/jank.runtime.max l r)))
+```
+
+Cuando el compilador ve una llamada a `max` con dos argumentos, sustituye la llamada completa por el cuerpo inline. El resultado: se eliminan el boxing de argumentos, el dereference del var y el boxing del retorno. Más de la mitad del tiempo desapareció de un plumazo.
+
+### Acto II: poda de instrucciones redundantes (2.309 → 2.247 ms)
+
+Revisando el IR generado, Wilkerson encontró joyas como esta:
+
+```clojure
+;; v4 ya es bool (resultado de jank::runtime::lte)
+{:name v4 :op :cpp/call :value "jank::runtime::lte" :args [n v3] :type bool}
+;; Convertimos bool → object
+{:name v5 :op :cpp/into-object :value v4 :type object_ref}
+;; Convertimos object → bool otra vez para el branch
+{:name v7 :op :truthy :value v5 :type bool}
+```
+
+Un viaje de ida y vuelta bool→object→bool completamente innecesario. Eliminado.
+
+### Acto III: nil sin función (2.247 → 1.400 ms)
+
+Este es mi favorito. La flamegraph mostraba muchísimo tiempo en `jank_nil` y `jank_const_nil`. ¿El motivo? Por razones técnicas relacionadas con el orden de inicialización de globales en C++, el valor `nil` de jank estaba detrás de una función. Cada acceso a `nil` —y en Clojure se accede a `nil` constantemente— implicaba una llamada a función. Wilkerson reescribió el constructor del tipo `object_ref` para permitir inicialización segura y `nil` pasó a ser una variable global. Ganancia neta: 847 ms.
+
+### Acto IV: tagged pointers (1.400 → 282 ms)
+
+Aquí está el núcleo del asunto. La flamegraph reveló que jank pasaba casi todo el tiempo **alocando enteros en el heap**. Cada suma, cada resta, cada comparación generaba un objeto `integer_ref` nuevo. El GC no daba abasto.
+
+La solución es un truco clásico de runtimes: **pointer tagging**. En arquitecturas de 64 bits, los punteros están alineados a 8 bytes, así que los tres bits inferiores siempre son `000`. Si ponemos el bit más bajo a `1`, podemos usar los 63 bits restantes para almacenar un entero directamente, sin alocar nada:
+
+```
+Puntero normal:  0xPPPPPPPPPPPPPPP0  (4 bits bajos: 0000, es un puntero real)
+Entero inmediato: 0xIIIIIIIIIIIIIII1  (bit bajo = 1, es un entero)
+```
+
+Para recuperar el valor entero basta con un shift a la derecha. Para los casos raros donde necesitas los 64 bits completos, se hace una alocación normal con el bit bajo a 0.
+
+Con esto, jank eliminó prácticamente todas las alocaciones de enteros del benchmark. De 1.400 a 282 ms. Ya estábamos a tiro de piedra de los 200 ms de la JVM.
+
+### Acto V: inlining agresivo (282 → 114 ms)
+
+Última flamegraph. Todavía se veían llamadas a `jank::runtime::add`, `jank::runtime::sub` y `jank::runtime::lte`. Estaban ahí, consumiendo ciclos, porque Clang no las estaba inlineando por decisión propia.
+
+Wilkerson añadió atributos explícitos:
+
+```cpp
+template <typename L, typename R>
+[[gnu::always_inline, gnu::flatten, gnu::hot]]
+auto add(L const l, R const r) { /* ... */ }
+```
+
+Y con eso, los 282 ms se convirtieron en 114 ms. jank ya no solo alcanzaba a la JVM: **la doblaba en velocidad**.
+
+## El resumen en números
+
+| Optimización | Tiempo (ms) | Ganancia |
+|---|---|---|
+| Sin optimizar | 5.522 | — |
+| Inline aritmética | 2.309 | −58% |
+| Poda de IR | 2.247 | −3% |
+| Nil sin función | 1.400 | −38% |
+| Tagged pointers | 282 | −80% |
+| Inline agresivo | **114** | −60% |
+| **Clojure JVM** | **200** | — |
+
+De 27× más lento a 1.75× más rápido. Mismo código, misma semántica, mismo benchmark.
+
+## Mi veredicto
+
+Lo que me flipa de esta historia no son los números —que también— sino el enfoque. Wilkerson no ha hecho trampa añadiendo type hints ni sacrificando dinamismo. Ha ido paso a paso, leyendo flamegraphs, preguntándose «¿por qué mi runtime está haciendo esto que no debería?» y eliminando todo lo que no era estrictamente necesario. Es optimización de las de antes: paciencia, perfilado y bisturí.
+
+El IR propio es la clave estratégica. Tener una representación intermedia que hable el idioma del lenguaje —y no el de la máquina— permite optimizaciones que simplemente no son posibles cuando delegas todo a LLVM. Es algo que proyectos como GraalVM o LuaJIT ya demostraron y que jank está aplicando con un nivel de transparencia envidiable.
+
+Dicho esto, hay que mantener la expectativa a raya. Esto es un micro-benchmark de fibonacci recursivo. El propio Wilkerson lo reconoce y su próximo objetivo es un ray tracer completo. La pregunta real es si estas optimizaciones se sostienen con código del mundo real, con efectos secundarios, con colecciones, con concurrencia. Pero la tendencia es sólida.
+
+Personalmente, llevo tiempo mirando con escepticismo los lenguajes que prometen «rendimiento nativo» para lenguajes dinámicos. jank es el primer proyecto en este espacio que me hace pensar que va en serio. No por el marketing —no tiene— sino porque las optimizaciones que describe son exactamente las correctas, en el orden correcto.
+
+Si alguna vez has escrito Clojure y has suspirado pensando en los segundos de arranque de la JVM, igual es momento de seguir de cerca a jank. La beta se acerca.
