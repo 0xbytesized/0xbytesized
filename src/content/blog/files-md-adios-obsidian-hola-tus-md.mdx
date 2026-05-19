@@ -1,0 +1,136 @@
+---
+title: "Files.md: adiós a Obsidian, hola a tus .md"
+date: "2026-05-19T00:20"
+tags: ["go", "open-source", "obsidian", "markdown", "local-first"]
+excerpt: "Alternativa open-source a Obsidian: local-first, funciona en el navegador y su código es tan simple que cabe en la cabeza de un LLM."
+---
+
+Han pasado cinco años desde que [Zakirullin](https://github.com/zakirullin) empezó a construir Files.md en su tiempo libre. Esta semana lo ha lanzado en Hacker News y en 24 horas ha acumulado más de 500 puntos y 273 comentarios. La razón es simple: es la alternativa a Obsidian que muchos llevaban años esperando, pero con una filosofía radicalmente distinta.
+
+## No es "otra app de notas más"
+
+El propio README lo admite con ironía: "Another note taking app? Maybe." Pero Files.md se diferencia en varios puntos clave que lo convierten en algo genuinamente distinto:
+
+1. **Local-first**: tus archivos son `.md` normales en una carpeta de tu disco duro. No hay base de datos propietaria, no hay formato secreto. Si mañana Files.md desaparece, tus notas siguen siendo tuyas y las abre cualquier editor de texto.
+
+2. **Navegador, sin instalar nada**: abres `web/index.html` y funciona. O usas la versión hosted en [app.files.md](https://app.files.md). No necesitas Electron, ni runtime de Node, ni dependencias de sistema. Solo un navegador.
+
+3. **Código tan simple que un LLM puede abarcarlo entero**: el autor lo dice explícitamente: "One person or an LLM can fit the whole project in head". Esto no es marketing. El backend son unos pocos miles de líneas de Go y el frontend es vanilla JS sin frameworks.
+
+4. **Bot de Telegram integrado**: puedes soltar ideas al chat del bot y se guardan automáticamente en tus archivos. Sin fricción. Sin apps额外.
+
+## Arquitectura: Go por detrás, vanilla JS por delante
+
+El backend de Files.md está escrito en Go y se compila en un único binario. El servidor expone dos cosas: una API REST para sincronización y un bot de Telegram. La estructura es limpia y sin magia:
+
+```
+cmd/
+  server/      → entrada del servidor + bot
+  backlink/    → utilidad para generar backlinks entre notas
+server/
+  fs/          → abstracción del sistema de archivos
+  bot/         → lógica del bot de Telegram (86KB de Go)
+  chat/        → gestión del chat diario
+  habits/      → seguimiento de hábitos en markdown
+  journal/     → diario personal
+  sync/        → sincronización entre dispositivos
+web/
+  index.html   → SPA sin build step
+  files.js     → 55KB de lógica principal
+  editor.js    → editor markdown con CodeMirror
+```
+
+Lo que más me llama la atención es la capa `server/fs`. Usa [afero](https://github.com/spf13/afero), una librería de abstracción de sistema de archivos para Go, que permite intercambiar el backend real (disco) por uno en memoria durante los tests. El resultado es un código testeable sin mocks:
+
+```go
+// fs.go — abstracción limpia con afero
+type FS struct {
+    rootPath string
+    backend  afero.Fs
+    quotaKB  int64
+}
+
+func NewFS(absRootPath string, backend afero.Fs) (*FS, error) {
+    exists, err := afero.Exists(backend, absRootPath)
+    if err != nil {
+        return nil, fmt.Errorf("new fs: %w", err)
+    }
+    if !exists {
+        err = backend.Mkdir(absRootPath, 0o755)
+        if err != nil {
+            return nil, fmt.Errorf("new fs: %w", err)
+        }
+    }
+    return &FS{absRootPath, backend, 0}, nil
+}
+```
+
+Esto significa que los tests de integración pueden ejecutarse contra un sistema de archivos falso, validando toda la lógica de escritura, lectura y cuotas sin tocar el disco. El archivo `fs_test.go` tiene 21KB de tests. Para un proyecto mantenido por una sola persona, eso es disciplina.
+
+El frontend es igual de directo. No hay React, no hay build step, no hay `node_modules`. Es un HTML con scripts vanilla que cargan CodeMirror como editor, HyperMD para preview de markdown y un sistema de autocompletado de enlaces entre notas. La navegación entre archivos se gestiona con un hash router casero en `files.js`:
+
+```javascript
+// Patrón típico en el frontend: sin frameworks, todo vanilla
+function openFile(hash) {
+    const file = findFileByHash(hash);
+    if (!file) return;
+
+    currentFile = file;
+    editor.setValue(file.content);
+    updateBacklinks(file.hash);
+    renderPreview(file.content);
+    window.location.hash = '#' + file.hash;
+}
+```
+
+El patrón es consistente en todo el código: funciones nombradas, estado global mínimo, cero magia. Cualquier desarrollador que sepa JavaScript y Go puede leer el código fuente entero en una tarde.
+
+## El chat como interfaz de captura
+
+Una de las ideas más interesantes de Files.md es usar un chat —sí, un chat— como mecanismo para volcar pensamientos. No es un chatbot con IA, es una interfaz conversacional para ti mismo. Escribes algo, le dices dónde guardarlo (o lo dejas para luego) y se almacena como un archivo `.md` en tu carpeta.
+
+El flujo desde el bot de Telegram es igual de directo. El `server/bot.go` procesa los mensajes entrantes, los parsea con el comando correspondiente y los persiste en el sistema de archivos del usuario:
+
+```go
+// Fragmento conceptual del flujo del bot
+func (b *Bot) handleMessage(upd tg.Update) {
+    userID := upd.UserID()
+    text := upd.MessageText()
+
+    fs, err := fs.NewUserFS(userID)
+    if err != nil {
+        b.sendError(userID, err)
+        return
+    }
+
+    // Guarda el mensaje como nota markdown
+    notePath := path.Join(fs.DirUserRoot, "inbox", generateFilename(text))
+    err = fs.WriteFile(notePath, []byte(text))
+    if err != nil {
+        b.sendError(userID, err)
+        return
+    }
+
+    b.sendMessage(userID, "✅ Guardado en "+notePath)
+}
+```
+
+No hay intermediarios. Tu mensaje de Telegram se convierte en un archivo `.md` en tu carpeta. Sin servidores ajenos, sin suscripciones, sin vendor lock-in.
+
+El servidor también procesa tareas periódicas: mueve tareas vencidas al día actual, limpia checklists completados y envía recordatorios de hábitos. Todo implementado con un ticker de 5 segundos y llamadas directas al sistema de archivos.
+
+## Open source de verdad, no "source available"
+
+Aquí va mi opinión. Obsidian no es open source. Tiene un README en GitHub, acepta contribuciones de la comunidad y usa markdown como formato, pero su núcleo es propietario. Si el equipo detrás de Obsidian decidiera cambiar el modelo de negocio mañana, tus bóvedas dependen de que la app siga funcionando como esperas.
+
+Files.md es MIT. Puedes forkearlo, modificarlo, montar tu propio servidor y no debes nada a nadie. La licencia MIT es lo más permisivo que existe en el ecosistema open source.
+
+Esto tiene implicaciones prácticas. Si usas Files.md y el autor abandona el proyecto, el código sigue ahí. Si mañana necesitas una feature que no existe, se la pides a un LLM con el código fuente como contexto y te la implementa. La simplicidad del código y el hecho de que use tecnologías mainstream (Go, JS vanilla) hace que sea materialmente posible extenderlo sin ser el autor original.
+
+## Mi veredicto
+
+Files.md no va a reemplazar a Obsidian para todo el mundo. Si necesitas plugins, graph view, temas custom y un ecosistema de extensiones, Obsidian sigue siendo la opción más pulida del mercado. Pero si lo que quieres es un sistema de notas que respete tu propiedad sobre los datos, que sea trivial de mantener y que puedas extender tú mismo —o pedirle a un LLM que lo haga—, Files.md es una joya.
+
+Lo que Zakirullin ha construido en 5 años trabajando solo es un caso de estudio de cómo hacer software sostenible: poco código, bien testeado, sin dependencias innecesarias y con una filosofía clara. En una época donde cada app de notas necesita 500MB de RAM y un proceso de Electron, Files.md refresca.
+
+El código está en [github.com/zakirullin/files.md](https://github.com/zakirullin/files.md). Son 970 estrellas a día de hoy y subiendo.
